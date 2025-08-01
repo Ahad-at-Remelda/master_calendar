@@ -11,7 +11,4 @@ urlpatterns = [
     # URL for Google to send webhook notifications to
     path('google-webhook/', views.google_webhook_receiver, name='google_webhook'),
     
-    # --- THIS IS THE MISSING URL ---
-    # URL for the browser to poll for updates
-    path('check-for-updates/', views.check_for_updates, name='check_for_updates'),
 ]

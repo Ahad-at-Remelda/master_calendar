@@ -1,16 +1,11 @@
-# master_calendar/asgi.py
+# master_calendar/routing.py
 
-import os
-from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from scheduler_app.consumers import CalendarConsumer  # again, adjust path
+from scheduler_app.consumers import CalendarConsumer  # adjust if needed
 from django.urls import re_path
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "master_calendar.settings")
-
 application = ProtocolTypeRouter({
-    "http": get_asgi_application(),
     "websocket": AuthMiddlewareStack(
         URLRouter([
             re_path(r"ws/calendar/$", CalendarConsumer.as_asgi()),

@@ -20,6 +20,11 @@ from dateutil import parser
 from .models import Event, GoogleWebhookChannel
 from .forms import EventForm
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+
+
 logger = logging.getLogger(__name__)
 
 def home(request):
@@ -102,27 +107,56 @@ def calendar_view(request, year, month):
     context = {'year': year, 'month': month, 'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month, 'next_year': next_year, 'next_month': next_month}
     return render(request, 'scheduler_app/calendar.html', context)
 
+# @csrf_exempt
+# def google_webhook_receiver(request):
+#     # (This view is correct, no changes needed)
+#     channel_id = request.headers.get('X-Goog-Channel-ID')
+#     resource_state = request.headers.get('X-Goog-Resource-State')
+#     if resource_state == 'sync' or resource_state == 'exists':
+#         logger.info(f"Received Google Webhook notification for channel: {channel_id}")
+#         try:
+#             webhook_channel = GoogleWebhookChannel.objects.get(channel_id=channel_id)
+#             user_id = webhook_channel.user.id
+#             cache.set(f'calendar_updated_{user_id}', True, timeout=120)
+#             logger.info(f"Set update flag for user_id: {user_id}")
+#         except GoogleWebhookChannel.DoesNotExist:
+#             logger.error(f"Received webhook for an unknown channel_id: {channel_id}")
+#     return HttpResponse(status=200)
+
+
+
 @csrf_exempt
 def google_webhook_receiver(request):
-    # (This view is correct, no changes needed)
     channel_id = request.headers.get('X-Goog-Channel-ID')
     resource_state = request.headers.get('X-Goog-Resource-State')
+
     if resource_state == 'sync' or resource_state == 'exists':
         logger.info(f"Received Google Webhook notification for channel: {channel_id}")
         try:
             webhook_channel = GoogleWebhookChannel.objects.get(channel_id=channel_id)
             user_id = webhook_channel.user.id
-            cache.set(f'calendar_updated_{user_id}', True, timeout=120)
-            logger.info(f"Set update flag for user_id: {user_id}")
+
+            # Send WebSocket event to the user’s group
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user_id}",  # group name = 'user_<id>'
+                {
+                    "type": "calendar.update",     # triggers method calendar_update()
+                    "update": "calendar_changed"   # custom message
+                }
+            )
+            logger.info(f"Sent calendar update to WebSocket group: user_{user_id}")
+
         except GoogleWebhookChannel.DoesNotExist:
-            logger.error(f"Received webhook for an unknown channel_id: {channel_id}")
+            logger.error(f"Received webhook for unknown channel_id: {channel_id}")
+
     return HttpResponse(status=200)
 
-@login_required
-def check_for_updates(request):
-    # (This view is correct, no changes needed)
-    user_id = request.user.id
-    if cache.get(f'calendar_updated_{user_id}'):
-        cache.delete(f'calendar_updated_{user_id}')
-        return JsonResponse({'update_available': True})
-    return JsonResponse({'update_available': False})
+# @login_required
+# def check_for_updates(request):
+#     # (This view is correct, no changes needed)
+#     user_id = request.user.id
+#     if cache.get(f'calendar_updated_{user_id}'):
+#         cache.delete(f'calendar_updated_{user_id}')
+#         return JsonResponse({'update_available': True})
+#     return JsonResponse({'update_available': False})

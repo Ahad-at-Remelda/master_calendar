@@ -40,7 +40,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '59faa4998f9e.ngrok-free.app',  # <-- your ngrok domain here
+    'https://c249c556ec79.ngrok-free.app',  # <-- your ngrok domain here
 ]
 
 
@@ -55,8 +55,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # Your app
-    'scheduler_app',
     
+    'channels',
+    'scheduler_app',
     # Allauth apps
     'django.contrib.sites',
     'allauth',
@@ -95,9 +96,16 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'master_calendar.wsgi.application'
+#WSGI_APPLICATION = 'master_calendar.wsgi.application'
+# settings.py
 
+ASGI_APPLICATION = 'master_calendar.asgi.application'
 
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # for local dev
+    },
+}
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
