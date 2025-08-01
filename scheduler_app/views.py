@@ -23,24 +23,30 @@ from .forms import EventForm
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-
-
 logger = logging.getLogger(__name__)
 
 def home(request):
-    # (This view is correct, no changes needed)
+    """
+    View for the home page with the "Master Calendar" button or login prompt.
+    """
     current_date = datetime.date.today()
     context = {'year': current_date.year, 'month': current_date.month}
     return render(request, 'scheduler_app/home.html', context)
 
 @login_required
 def add_event(request, year, month, day):
-    # (This view is correct, no changes needed)
+    """
+    View to add a new local event to your app's database.
+    This view now links the event to the logged-in user.
+    """
     event_date = datetime.date(year, month, day)
     if request.method == 'POST':
         form = EventForm(request.POST)
         if form.is_valid():
             event = form.save(commit=False)
+            # --- CHANGE #1: Assign the current logged-in user ---
+            event.user = request.user
+            # ---------------------------------------------------
             event.date = event_date
             event.save()
             return redirect('calendar', year=year, month=month)
@@ -51,6 +57,10 @@ def add_event(request, year, month, day):
 
 @login_required
 def calendar_view(request, year, month):
+    """
+    The main calendar view.
+    This view now only shows local events created by the logged-in user.
+    """
     year = int(year)
     month = int(month)
     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
@@ -59,10 +69,17 @@ def calendar_view(request, year, month):
     start_day_of_week = (first_weekday + 1) % 7
     events_by_day = {day: [] for day in range(1, num_days + 1)}
 
-    local_events = Event.objects.filter(date__year=year, date__month=month)
+    # --- CHANGE #2: Filter local events by the current user ---
+    local_events = Event.objects.filter(
+        user=request.user,
+        date__year=year,
+        date__month=month
+    )
+    # ---------------------------------------------------------
     for event in local_events:
         events_by_day[event.date.day].append({'title': event.title, 'source': 'local', 'start_time': event.date.strftime('%I:%M %p')})
 
+    # (The Google Calendar sync logic below remains the same)
     try:
         token = SocialToken.objects.get(account__user=request.user, account__provider='google')
         logger.info(f"Found Google token for user: {request.user.username}")
@@ -107,24 +124,6 @@ def calendar_view(request, year, month):
     context = {'year': year, 'month': month, 'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month, 'next_year': next_year, 'next_month': next_month}
     return render(request, 'scheduler_app/calendar.html', context)
 
-# @csrf_exempt
-# def google_webhook_receiver(request):
-#     # (This view is correct, no changes needed)
-#     channel_id = request.headers.get('X-Goog-Channel-ID')
-#     resource_state = request.headers.get('X-Goog-Resource-State')
-#     if resource_state == 'sync' or resource_state == 'exists':
-#         logger.info(f"Received Google Webhook notification for channel: {channel_id}")
-#         try:
-#             webhook_channel = GoogleWebhookChannel.objects.get(channel_id=channel_id)
-#             user_id = webhook_channel.user.id
-#             cache.set(f'calendar_updated_{user_id}', True, timeout=120)
-#             logger.info(f"Set update flag for user_id: {user_id}")
-#         except GoogleWebhookChannel.DoesNotExist:
-#             logger.error(f"Received webhook for an unknown channel_id: {channel_id}")
-#     return HttpResponse(status=200)
-
-
-
 @csrf_exempt
 def google_webhook_receiver(request):
     channel_id = request.headers.get('X-Goog-Channel-ID')
@@ -135,26 +134,20 @@ def google_webhook_receiver(request):
         try:
             webhook_channel = GoogleWebhookChannel.objects.get(channel_id=channel_id)
             user_id = webhook_channel.user.id
-
-            # Send WebSocket event to the user’s group
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
-                f"user_{user_id}",  # group name = 'user_<id>'
-                {
-                    "type": "calendar.update",     # triggers method calendar_update()
-                    "update": "calendar_changed"   # custom message
-                }
+                f"user_{user_id}",
+                {"type": "calendar.update", "update": "calendar_changed"}
             )
             logger.info(f"Sent calendar update to WebSocket group: user_{user_id}")
-
         except GoogleWebhookChannel.DoesNotExist:
             logger.error(f"Received webhook for unknown channel_id: {channel_id}")
-
     return HttpResponse(status=200)
 
 # @login_required
 # def check_for_updates(request):
-#     # (This view is correct, no changes needed)
+#     # This is a fallback/alternative to WebSockets. 
+#     # If your WebSockets are working, you might not need this.
 #     user_id = request.user.id
 #     if cache.get(f'calendar_updated_{user_id}'):
 #         cache.delete(f'calendar_updated_{user_id}')
