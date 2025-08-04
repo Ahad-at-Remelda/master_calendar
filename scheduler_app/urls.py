@@ -8,7 +8,8 @@ urlpatterns = [
     path('calendar/<int:year>/<int:month>/', views.calendar_view, name='calendar'),
     path('add/<int:year>/<int:month>/<int:day>/', views.add_event, name='add_event'),
     
-    # URL for Google to send webhook notifications to
+    # --- URL for Google to send webhook notifications to ---
     path('google-webhook/', views.google_webhook_receiver, name='google_webhook'),
-    
+    path("trigger-webhook/", views.trigger_webhook, name="trigger_webhook"),
+
 ]

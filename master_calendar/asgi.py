@@ -1,22 +1,20 @@
-# master_calendar/asgi.py
-
 import os
-from django.core.asgi import get_asgi_application
+import django
 from channels.routing import ProtocolTypeRouter, URLRouter
+from django.core.asgi import get_asgi_application
 from channels.auth import AuthMiddlewareStack
-import scheduler_app.routing # Import the routing file from your app
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "master_calendar.settings")
+# ✅ Configure settings before importing anything Django-related
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'master_calendar.settings')
+django.setup()  # 🔥 This is what was missing
 
-# This is the standard and correct way to configure your ASGI application
+# ✅ Now safe to import app routing
+import scheduler_app.routing
+
 application = ProtocolTypeRouter({
-    # Django's HTTP handling
     "http": get_asgi_application(),
-
-    # WebSocket handling
     "websocket": AuthMiddlewareStack(
         URLRouter(
-            # We get the WebSocket URL patterns from your app's routing file
             scheduler_app.routing.websocket_urlpatterns
         )
     ),

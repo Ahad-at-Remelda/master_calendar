@@ -1,5 +1,5 @@
 {% load static %}
-{% load socialaccount %} <!-- Load the allauth template tags -->
+{% load socialaccount %}
 
 <!DOCTYPE html>
 <html lang="en">
@@ -11,26 +11,28 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
 </head>
 <body class="bg-light">
-
     <div class="container text-center" style="margin-top: 20vh;">
-        <h1 class="display-4 mb-4">Your New Calendar Assistant</h1>
-        <p class="lead mb-5">Connect your calendars and supercharge your scheduling.</p>
         
         {% if user.is_authenticated %}
-            <!-- If the user is logged in, show the button to the calendar -->
-            <p>Welcome, {{ user.username }}!</p>
-            <a href="{% url 'calendar' year=year month=month %}" class="btn btn-primary btn-lg">
-                Go to Master Calendar
-            </a>
-             <a href="{% url 'account_logout' %}" class="btn btn-secondary btn-lg">Logout</a>
+            <!-- --- LOGGED IN USER VIEW --- -->
+            <h1 class="display-4 mb-4">Welcome Back!</h1>
+            <p class="lead mb-5">You are logged in as {{ user.username }}.</p>
+            <div class="d-grid gap-2 col-6 mx-auto">
+                <a href="{% url 'calendar' year=year month=month %}" class="btn btn-primary btn-lg">
+                    Go to Your Master Calendar
+                </a>
+                <a href="{% url 'account_logout' %}" class="btn btn-secondary">Logout</a>
+            </div>
         {% else %}
-            <!-- If the user is not logged in, show the Google login button -->
-            <h3 class="h4 fw-normal mb-3">The first step is to connect your calendar.</h3>
-            <a href="{% provider_login_url 'google' %}" class="btn btn-lg btn-danger">
-                <i class="bi bi-google"></i> Connect with Google Calendar
-            </a>
+            <!-- --- LOGGED OUT USER VIEW --- -->
+            <h1 class="display-4 mb-4">Your New Calendar Assistant</h1>
+            <p class="lead mb-5">Login to view and manage your calendar.</p>
+            <div class="d-grid gap-2 col-6 mx-auto">
+                <a href="{% provider_login_url 'google' %}" class="btn btn-lg btn-danger">
+                    <i class="bi bi-google"></i> Login with Google
+                </a>
+            </div>
         {% endif %}
     </div>
-
 </body>
 </html>
