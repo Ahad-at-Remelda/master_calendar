@@ -34,11 +34,14 @@ def home(request):
 @login_required
 def add_event(request):
     """
-    This view handles adding a new event via a generalized form.
-    It now passes the current date to the template for the cancel button.
+    This view now correctly handles and displays validation errors from the form.
     """
     if request.method == 'POST':
         form = EventForm(request.POST)
+        # --- THIS IS THE CRITICAL CHANGE ---
+        # The form.is_valid() call automatically triggers the clean() method.
+        # If clean() raises a ValidationError, is_valid() will be False,
+        # and the form object will now contain the error messages.
         if form.is_valid():
             event = form.save(commit=False)
             event.user = request.user
@@ -47,20 +50,21 @@ def add_event(request):
             
             new_event_date = form.cleaned_data['date']
             return redirect('calendar', year=new_event_date.year, month=new_event_date.month)
+        # If the form is NOT valid, the code will now fall through and re-render
+        # the page, passing the form object (which now contains the errors)
+        # to the template. The template will then display them.
+            
     else:
         form = EventForm(initial={'date': date.today()})
 
-    # --- THIS IS THE CRITICAL FIX ---
-    # We will pass the current year and month to the template context
-    # so the "Cancel" button knows where to go.
     today = date.today()
     context = {
         'form': form,
         'year': today.year,
         'month': today.month
     }
-    # --------------------------------
     return render(request, 'scheduler_app/add_event.html', context)
+
 
 
 @login_required
@@ -111,10 +115,18 @@ def calendar_view(request, year, month):
     return render(request, 'scheduler_app/calendar.html', context)
 
 
+# scheduler_app/views.py
+
+# (All your imports and other views can stay the same)
+# ...
+
 @csrf_exempt
 def google_webhook_receiver(request):
     """
-    Receives notifications, syncs the DB, and triggers the WebSocket push.
+    This view now performs a full, intelligent sync.
+    - It updates existing events.
+    - It creates new events.
+    - It deletes events that have been removed from Google Calendar.
     """
     channel_id = request.headers.get('X-Goog-Channel-ID')
     resource_id = request.headers.get('X-Goog-Resource-ID')
@@ -139,24 +151,34 @@ def google_webhook_receiver(request):
             token.save()
 
         service = build('calendar', 'v3', credentials=credentials)
-        events_result = service.events().list(calendarId='primary', singleEvents=True, orderBy='startTime').execute()
-        google_events = events_result.get('items', [])
-        logger.info(f"Fetched {len(google_events)} total events from Google for user {user.username} after webhook.")
+        
+        # Fetch all events from the user's primary calendar
+        events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
+        google_events_data = events_result.get('items', [])
+        logger.info(f"Fetched {len(google_events_data)} total events from Google for user {user.username} after webhook.")
 
-        google_event_ids_in_sync = []
-        for event_data in google_events:
+        # --- THIS IS THE NEW, INTELLIGENT SYNC LOGIC ---
+
+        # Step 1: Get the IDs of all events received from Google.
+        google_event_ids = {event_data['id'] for event_data in google_events_data}
+
+        # Step 2: Update or Create events based on the Google data.
+        for event_data in google_events_data:
             event_id = event_data.get('id')
             if not event_id: continue
-            google_event_ids_in_sync.append(event_id)
-            
+
             start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
             if not start_raw: continue
 
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')) if event_data.get('end') else None
 
+            # The update_or_create method is perfect for this.
+            # It finds an event with the matching event_id and user, or creates a new one.
+            # It then updates all the fields in 'defaults' with the latest info from Google.
             Event.objects.update_or_create(
-                user=user, event_id=event_id,
+                user=user, 
+                event_id=event_id,
                 defaults={
                     'title': event_data.get('summary', 'No Title'),
                     'description': event_data.get('description', ''),
@@ -171,20 +193,27 @@ def google_webhook_receiver(request):
                 }
             )
         
-        Event.objects.filter(user=user, source='google').exclude(event_id__in=google_event_ids_in_sync).delete()
+        # Step 3: Delete any events that are in our database but were NOT in the list from Google.
+        # This handles deletions.
+        Event.objects.filter(user=user, source='google').exclude(event_id__in=google_event_ids).delete()
 
+        logger.info(f"Sync complete for user {user.username}. Local DB is now up-to-date.")
+        # -----------------------------------------------------------
+
+        # Trigger the WebSocket push notification to the browser
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"user_{user.id}",
             {"type": "calendar.update", "update": "calendar_changed"}
         )
-        logger.info(f"Sync complete. Sent update to WebSocket for user {user.id}")
+        logger.info(f"Sent update to WebSocket for user {user.id}")
 
     except Exception as e:
         logger.error(f"Error syncing events for {user.username} via webhook: {e}", exc_info=True)
         return HttpResponse("Sync failure", status=500)
 
     return HttpResponse("Webhook processed successfully.", status=200)
+
 
 # The other helper/debug views are not needed for production but can be kept for testing
 # ... (start_google_calendar_watch, trigger_webhook, sync_events) ...
