@@ -1,6 +1,9 @@
 # scheduler_app/views.py
 
 
+
+import requests # We'll use the requests library for the Microsoft Graph API
+
 import datetime
 import calendar as cal
 import logging
@@ -20,9 +23,11 @@ from dateutil import parser
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
+
 from .models import Event, GoogleWebhookChannel
 from .forms import EventForm
 from datetime import date
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +74,9 @@ def add_event(request):
 
 @login_required
 def calendar_view(request, year, month):
-    """
-    This view is now efficient and only displays events from the local database.
-    This solves the event duplication problem.
-    """
     year = int(year)
     month = int(month)
+    # (Navigation and calendar setup logic is correct)
     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
     first_weekday, num_days = cal.monthrange(year, month)
@@ -82,7 +84,8 @@ def calendar_view(request, year, month):
     events_by_day = {day: [] for day in range(1, num_days + 1)}
 
     if request.user.is_authenticated:
-        # Fetch all events (local and synced) for this user from our one database table
+        # Fetch all local events for this user from our database.
+        # This will include events synced from both Google and Outlook.
         all_user_events = Event.objects.filter(
             user=request.user,
             date__year=year,
@@ -97,13 +100,76 @@ def calendar_view(request, year, month):
                 'start_time': start_time_str
             })
 
+    # --- THIS IS THE EXISTING, CORRECT GOOGLE SYNC LOGIC ---
+    # We will now add a parallel block for Outlook sync
+    try:
+        # This is a simplified fetch to ensure the page loads, the real sync happens via webhook
+        pass # The webhook handles the main Google Sync
+    except Exception as e:
+        logger.error(f"Error during Google sync check: {e}")
+
+
+    # --- THIS IS THE NEW BLOCK FOR OUTLOOK/MICROSOFT GRAPH SYNC ---
+    try:
+        # 1. Find the user's token for the 'microsoft' provider
+        token = SocialToken.objects.get(account__user=request.user, account__provider='microsoft')
+        
+        # 2. Prepare the request to the Microsoft Graph API
+        graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/calendar/events'
+        headers = {
+            'Authorization': f'Bearer {token.token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Define the time window for the calendar view
+        time_min = datetime.datetime(year, month, 1, tzinfo=datetime.timezone.utc)
+        time_max = datetime.datetime(year, month, num_days, 23, 59, 59, tzinfo=datetime.timezone.utc)
+        
+        params = {
+            '$select': 'subject,start,end,bodyPreview,location',
+            '$filter': f"start/dateTime ge '{time_min.isoformat()}' and end/dateTime le '{time_max.isoformat()}'",
+            '$orderby': 'start/dateTime'
+        }
+
+        # 3. Make the API call
+        response = requests.get(graph_api_endpoint, headers=headers, params=params)
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+        outlook_events_data = response.json().get('value', [])
+        logger.info(f"Fetched {len(outlook_events_data)} Outlook events for user {request.user.username}")
+
+        # 4. Process the events and add them to our display dictionary
+        for event_data in outlook_events_data:
+            start_raw = event_data.get('start', {}).get('dateTime')
+            if not start_raw: continue
+
+            start_datetime = parser.parse(start_raw)
+            day = start_datetime.day
+
+            if 1 <= day <= num_days:
+                events_by_day[day].append({
+                    'title': event_data.get('subject', 'No Title'),
+                    'source': 'outlook',
+                    'start_time': start_datetime.strftime('%I:%M %p')
+                })
+
+    except SocialToken.DoesNotExist:
+        # This is normal if the user hasn't connected their Outlook account
+        pass
+    except Exception as e:
+        logger.error(f"Outlook Calendar sync failed: {e}", exc_info=True)
+        messages.error(request, "An error occurred while syncing with your Outlook Calendar.")
+    # ----------------------------------------------------------------
+
     days_data = []
     for _ in range(start_day_of_week):
         days_data.append({'is_placeholder': True})
     for day in range(1, num_days + 1):
+        # We re-sort here to combine events from all sources correctly
+        sorted_events = sorted(events_by_day.get(day, []), key=lambda x: x['start_time'])
         days_data.append({
             'day': day,
-            'events': events_by_day.get(day, []),
+            'events': sorted_events,
             'is_placeholder': False
         })
 
@@ -113,12 +179,6 @@ def calendar_view(request, year, month):
         'next_year': next_year, 'next_month': next_month,
     }
     return render(request, 'scheduler_app/calendar.html', context)
-
-
-# scheduler_app/views.py
-
-# (All your imports and other views can stay the same)
-# ...
 
 @csrf_exempt
 def google_webhook_receiver(request):
@@ -214,7 +274,81 @@ def google_webhook_receiver(request):
 
     return HttpResponse("Webhook processed successfully.", status=200)
 
+@csrf_exempt
+def outlook_webhook_receiver(request):
+    # 1. Handle Microsoft's initial validation request
+    validation_token = request.GET.get('validationToken')
+    if validation_token:
+        logger.info("Received Outlook validation request. Responding with token.")
+        return HttpResponse(validation_token, content_type='text/plain', status=200)
 
+    # 2. Process the actual change notification
+    try:
+        notification = json.loads(request.body)
+        subscription_id = notification['value'][0]['subscriptionId']
+        logger.info(f"Received Outlook Webhook notification for subscription: {subscription_id}")
+
+        # 3. Find the user associated with this subscription
+        webhook_subscription = OutlookWebhookSubscription.objects.get(subscription_id=subscription_id)
+        user = webhook_subscription.user
+
+        # 4. Authenticate with the Microsoft Graph API using the user's saved token
+        token = SocialToken.objects.get(account__user=user, account__provider='microsoft')
+        # Note: Microsoft Graph token refresh is handled differently and is more complex.
+        # For now, we assume a valid token. A full production app would handle token refresh here.
+        headers = {'Authorization': f'Bearer {token.token}'}
+        graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
+        
+        # 5. Fetch all events from Outlook to perform a full sync
+        response = requests.get(graph_api_endpoint, headers=headers)
+        response.raise_for_status()
+        outlook_events_data = response.json().get('value', [])
+        logger.info(f"Fetched {len(outlook_events_data)} total events from Outlook for user {user.username} after webhook.")
+        
+        # 6. Perform the intelligent sync (update, create, delete)
+        outlook_event_ids_in_sync = []
+        for event_data in outlook_events_data:
+            event_id = event_data.get('id')
+            if not event_id: continue
+            outlook_event_ids_in_sync.append(event_id)
+            
+            start_raw = event_data.get('start', {}).get('dateTime')
+            if not start_raw: continue
+
+            start_time = parser.parse(start_raw)
+            end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
+
+            Event.objects.update_or_create(
+                user=user, 
+                event_id=event_id,
+                defaults={
+                    'title': event_data.get('subject', 'No Title'),
+                    'description': event_data.get('bodyPreview', ''),
+                    'date': start_time.date(),
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'source': 'outlook',
+                    'etag': event_data.get('@odata.etag', ''),
+                    'location': event_data.get('location', {}).get('displayName', ''),
+                }
+            )
+        
+        # Delete local events that were removed from Outlook
+        Event.objects.filter(user=user, source='outlook').exclude(event_id__in=outlook_event_ids_in_sync).delete()
+
+        # 7. Trigger the WebSocket push notification
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user.id}",
+            {"type": "calendar.update", "update": "calendar_changed"}
+        )
+        logger.info(f"Outlook sync complete. Sent update to WebSocket for user {user.id}")
+
+    except Exception as e:
+        logger.error(f"Error processing Outlook webhook: {e}", exc_info=True)
+    
+    # Always return a 200 OK to Microsoft
+    return HttpResponse(status=200)
 # The other helper/debug views are not needed for production but can be kept for testing
 # ... (start_google_calendar_watch, trigger_webhook, sync_events) ...
 def start_google_calendar_watch(user, credentials):

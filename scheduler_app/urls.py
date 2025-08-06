@@ -20,4 +20,5 @@ urlpatterns = [
     # Your other debug/testing URLs can remain
     path("trigger-webhook/", views.trigger_webhook, name="trigger_webhook"),
     path('api/sync-events/', views.sync_events, name='sync_events'),
+    path('outlook-webhook/', views.outlook_webhook_receiver, name='outlook_webhook'),
 ]

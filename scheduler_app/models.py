@@ -71,3 +71,13 @@ class UserProfile(models.Model):
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
     UserProfile.objects.get_or_create(user=instance)
+    
+# --- THIS IS THE NEW MODEL FOR OUTLOOK ---
+class OutlookWebhookSubscription(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="outlook_webhook_subscription")
+    subscription_id = models.CharField(max_length=255, unique=True)
+    expiration_datetime = models.DateTimeField()
+
+    def __str__(self):
+        return f"Webhook for {self.user.username} (Outlook)"
+# ----------------------------------------

@@ -7,7 +7,8 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL=os.environ.get("USE_NGROK")
+NGROK_URL= 'https://1070c35f0614.ngrok-free.app'
+
 # --- THIS IS THE CRITICAL FIX ---
 # Hostnames must NOT include 'http://' or 'https://'.
 # The '.ngrok-free.app' entry is a wildcard that will match any ngrok subdomain.
@@ -26,7 +27,7 @@ CSRF_TRUSTED_ORIGINS = [
     #NGROK_URL,
     #'https://79c15e1980a4.ngrok-free.app'
     'https://1070c35f0614.ngrok-free.app ',
-    'https://099f9402e7ff.ngrok-free.app',
+    #'https://099f9402e7ff.ngrok-free.app',
     'https://*.ngrok-free.app',
     #'.ngrok-free.app',
 ]

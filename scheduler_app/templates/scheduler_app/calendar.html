@@ -67,6 +67,18 @@
             background-color: #f8f9fa;
             border: 1px solid #ddd;
         }
+        .calendar-day { min-height: 120px; border: 1px solid #ddd; padding: 10px; position: relative; display: flex; flex-direction: column; }
+        .placeholder-day { min-height: 120px; background-color: #f8f9fa; border: 1px solid #eee; }
+        .calendar-day-header { font-weight: bold; font-size: 1.1em; text-align: right; }
+        .event-list { flex-grow: 1; overflow-y: auto; margin-top: 5px; }
+        .event { font-size: 0.85em; margin-bottom: 5px; padding: 3px 6px; border-radius: 5px; word-wrap: break-word; color: white; }
+        .google-event { background-color: #28a745; /* Green */ }
+        .local-event { background-color: #17a2b8; /* Blue */ }
+        /* --- THIS IS THE NEW STYLE FOR OUTLOOK EVENTS --- */
+        .outlook-event { background-color: #0078D4; /* Microsoft Blue */ }
+        /* --------------------------------------------- */
+        .btn-add-event { position: absolute; bottom: 5px; left: 5px; }
+        .day-name { font-weight: bold; text-align: center; padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; }
     </style>
 </head>
 <body class="bg-light">
@@ -74,20 +86,19 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div class="btn-group">
                 <a class="btn btn-secondary" href="{% url 'home' %}"><i class="bi bi-house-door-fill"></i> Home</a>
-                <!-- --- THIS IS THE NEW "ADD EVENT" BUTTON --- -->
                 <a class="btn btn-success" href="{% url 'add_event' %}"><i class="bi bi-plus-circle-fill"></i> Add Event</a>
-                <!---------------------------------------- -->
             </div>
-            
             <h1 class="mb-0 h3">{{ month }}/{{ year }}</h1>
-            
             <div class="btn-group">
                 <a class="btn btn-outline-primary" href="{% url 'calendar' year=prev_year month=prev_month %}"><i class="bi bi-arrow-left"></i> Previous</a>
                 <a class="btn btn-outline-primary" href="{% url 'calendar' year=next_year month=next_month %}">Next <i class="bi bi-arrow-right"></i></a>
             </div>
         </div>
 
-        <!-- (The rest of your calendar grid and event display logic is correct) -->
+        <div class="calendar-grid mb-3">
+            <div class="day-name">Sun</div><div class="day-name">Mon</div><div class="day-name">Tue</div><div class="day-name">Wed</div><div class="day-name">Thu</div><div class="day-name">Fri</div><div class="day-name">Sat</div>
+        </div>
+
         <div class="calendar-grid">
             {% for data in days_data %}
                 {% if data.is_placeholder %}
@@ -97,15 +108,24 @@
                         <div class="calendar-day-header">{{ data.day }}</div>
                         <div class="event-list">
                             {% for event in data.events %}
-                                <div class="event {% if event.source == 'google' %}google-event{% else %}local-event{% endif %}">
+                                <!-- --- THIS IS THE CRITICAL CHANGE --- -->
+                                <div class="event 
+                                    {% if event.source == 'google' %}google-event
+                                    {% elif event.source == 'outlook' %}outlook-event
+                                    {% else %}local-event{% endif %}">
+                                <!-- --------------------------------- -->
                                     <strong>{{ event.title }}</strong>
                                     {% if event.start_time and event.start_time != 'All Day' %}
-                                        <br><small><i class="bi bi-clock"></i> {{ event.start_time }}</small>
+                                        <br><small>
+                                            {% if event.source == 'google' %}<i class="bi bi-google"></i>
+                                            {% elif event.source == 'outlook' %}<i class="bi bi-microsoft"></i>
+                                            {% else %}<i class="bi bi-calendar-plus"></i>{% endif %}
+                                            {{ event.start_time }}
+                                        </small>
                                     {% endif %}
                                 </div>
                             {% endfor %}
                         </div>
-                        <!-- THE '+' BUTTON THAT WAS HERE IS NOW REMOVED -->
                     </div>
                 {% endif %}
             {% endfor %}
