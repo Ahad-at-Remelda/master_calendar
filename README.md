@@ -9,12 +9,14 @@ terminal 2 : daphne master_calendar.asgi:application
 
 daphne -p 8000 master_calendar.asgi:application
 
-
+change required:
 settings-> allowedhosts,crsf trusted token
-googleConsole->https://451c7a253a95.ngrok-free.app/accounts/google/login/callback/
+googleConsole-> https://1070c35f0614.ngrok-free.app/accounts/google/login/callback/
+also in signals.py 
+.env
 everytime....
 
- https://79c15e1980a4.ngrok-free.app
 
-https://099f9402e7ff.ngrok-free.app/register-google-watch/
-https://e6aa5233a861.ngrok-free.app
+https://1070c35f0614.ngrok-free.app 
+ 
+https://1070c35f0614.ngrok-free.app /register-google-watch/

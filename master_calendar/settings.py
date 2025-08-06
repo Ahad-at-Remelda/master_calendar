@@ -16,16 +16,19 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     #'https://e5e73c80b3cc.ngrok-free.app',
     #'099f9402e7ff.ngrok-free.app',
-     '79c15e1980a4.ngrok-free.app',
+    #'79c15e1980a4.ngrok-free.app',
     #'https://1a28557200dd.ngrok-free.app'
+    '1070c35f0614.ngrok-free.app' ,
+    
 ]
 # --------------------------------
 CSRF_TRUSTED_ORIGINS = [
     #NGROK_URL,
     #'https://79c15e1980a4.ngrok-free.app'
+    'https://1070c35f0614.ngrok-free.app ',
     'https://099f9402e7ff.ngrok-free.app',
     'https://*.ngrok-free.app',
-    '.ngrok-free.app',
+    #'.ngrok-free.app',
 ]
 
 INSTALLED_APPS = [

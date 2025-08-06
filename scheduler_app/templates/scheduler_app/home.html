@@ -14,7 +14,6 @@
     <div class="container text-center" style="margin-top: 20vh;">
         
         {% if user.is_authenticated %}
-            <!-- --- LOGGED IN USER VIEW --- -->
             <h1 class="display-4 mb-4">Welcome Back!</h1>
             <p class="lead mb-5">You are logged in as {{ user.username }}.</p>
             <div class="d-grid gap-2 col-6 mx-auto">
@@ -24,7 +23,6 @@
                 <a href="{% url 'account_logout' %}" class="btn btn-secondary">Logout</a>
             </div>
         {% else %}
-            <!-- --- LOGGED OUT USER VIEW --- -->
             <h1 class="display-4 mb-4">Your New Calendar Assistant</h1>
             <p class="lead mb-5">Login to view and manage your calendar.</p>
             <div class="d-grid gap-2 col-6 mx-auto">

@@ -14,6 +14,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from .models import GoogleWebhookChannel
+from allauth.account.signals import user_signed_up
+from .models import UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ def setup_google_webhook_on_login(sender, request, sociallogin, **kwargs):
         service = build('calendar', 'v3', credentials=credentials)
         
         # Get the public URL from the running ngrok tunnel
-        public_url =  'https://79c15e1980a4.ngrok-free.app'
+        public_url =  'https://1070c35f0614.ngrok-free.app'
         logger.info(f"Ngrok tunnel detected at: {public_url}")
 
         webhook_url = public_url + reverse('google_webhook')
@@ -80,3 +82,8 @@ def setup_google_webhook_on_login(sender, request, sociallogin, **kwargs):
 
     except Exception as e:
         logger.error(f"FATAL: Could not automatically register webhook on login: {e}", exc_info=True)
+        
+        
+@receiver(user_signed_up)
+def create_profile_on_social_signup(request, user, **kwargs):
+    UserProfile.objects.get_or_create(user=user)
