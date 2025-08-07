@@ -10,26 +10,56 @@ from django.dispatch import receiver
 from django.urls import reverse
 from django.utils.timezone import now
 
-# Allauth signals
 from allauth.socialaccount.signals import social_account_updated, social_account_added
 from allauth.account.signals import user_signed_up
 
-# Google API imports
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from dateutil import parser
 
-# Import all necessary models
-from .models import GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile
+from .models import GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile, Event
 
 logger = logging.getLogger(__name__)
+
+def sync_outlook_events(user, token):
+    """Helper function to perform a full sync of Outlook events."""
+    try:
+        headers = {'Authorization': f'Bearer {token}'}
+        graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
+        response = requests.get(graph_api_endpoint, headers=headers)
+        response.raise_for_status()
+        outlook_events_data = response.json().get('value', [])
+        logger.info(f"Fetched {len(outlook_events_data)} Outlook events for {user.username}")
+        outlook_event_ids = [event_data.get('id') for event_data in outlook_events_data if event_data.get('id')]
+
+        for event_data in outlook_events_data:
+            event_id = event_data.get('id')
+            if not event_id: continue
+            start_raw = event_data.get('start', {}).get('dateTime')
+            if not start_raw: continue
+            start_time = parser.parse(start_raw)
+            end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
+            Event.objects.update_or_create(
+                user=user, event_id=event_id,
+                defaults={
+                    'title': event_data.get('subject', 'No Title'),
+                    'description': event_data.get('bodyPreview', ''),
+                    'date': start_time.date(),
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'source': 'outlook',
+                    'etag': event_data.get('@odata.etag', ''),
+                    'location': event_data.get('location', {}).get('displayName', ''),
+                }
+            )
+        Event.objects.filter(user=user, source='outlook').exclude(event_id__in=outlook_event_ids).delete()
+        logger.info(f"Outlook events synced successfully for {user.username}")
+    except Exception as e:
+        logger.error(f"Failed to sync Outlook events for {user.username}: {e}", exc_info=True)
 
 @receiver(social_account_added)
 @receiver(social_account_updated)
 def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
-    """
-    Handles automated webhook registration for BOTH Google and Microsoft.
-    """
     user = sociallogin.user
     provider = sociallogin.account.provider
 
@@ -38,28 +68,24 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
 
     logger.info(f"Signal received for '{provider}' user: {user.username}. Setting up webhook.")
 
-    # --- THIS IS THE CRITICAL FIX ---
-    # We are going back to a simple, hardcoded URL.
-    # You MUST ensure this URL matches the one from your ngrok terminal.
     try:
-        # Get the ngrok URL from the environment variable defined in your settings
         public_url = settings.NGROK_URL
         if not public_url:
-            raise ValueError("NGROK_URL is not set in your environment.")
-        logger.info(f"Using ngrok URL from settings: {public_url}")
+            raise ValueError("NGROK_URL is not set in your settings.py file.")
     except (AttributeError, ValueError) as e:
-        logger.error(f"FATAL: NGROK_URL not configured in settings.py. Aborting webhook setup. Error: {e}")
+        logger.error(f"FATAL: NGROK_URL not configured. Aborting webhook setup. Error: {e}")
         return
-    # --------------------------------
 
-    # --- GOOGLE LOGIC ---
+    # --- THIS IS THE CORRECTED LOGIC ---
     if provider == 'google':
         try:
             token = sociallogin.token
             credentials = Credentials(
-                token=token.token, refresh_token=token.token_secret,
+                token=token.token,
+                refresh_token=token.token_secret,
                 token_uri='https://oauth2.googleapis.com/token',
-                client_id=sociallogin.token.app.client_id, client_secret=sociallogin.token.app.secret
+                client_id=sociallogin.token.app.client_id,
+                client_secret=sociallogin.token.app.secret
             )
             service = build('calendar', 'v3', credentials=credentials)
             webhook_url = public_url + reverse('google_webhook')
@@ -70,19 +96,23 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
             if old_channel:
                 service.channels().stop(body={'id': old_channel.channel_id, 'resourceId': old_channel.resource_id}).execute()
                 old_channel.delete()
-            
+
             response = service.events().watch(calendarId='primary', body=watch_request_body).execute()
-            GoogleWebhookChannel.objects.create(user=user, channel_id=response['id'], resource_id=response['resourceId'])
+            GoogleWebhookChannel.objects.create(
+                user=user,
+                channel_id=response['id'],
+                resource_id=response['resourceId']
+            )
             logger.info(f"SUCCESS: Automatically registered Google webhook for {user.username}!")
+
         except Exception as e:
             logger.error(f"FATAL: Could not register Google webhook: {e}", exc_info=True)
 
-    # --- MICROSOFT LOGIC ---
-    elif provider == 'microsoft':
+    elif provider == 'MasterCalendarClient':
         try:
             token = sociallogin.token.token
             graph_api_endpoint = 'https://graph.microsoft.com/v1.0/subscriptions'
-            headers = {'Authorization': f'Bearer {token}'}
+            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
             expiration_time = now() + timedelta(days=2)
             subscription_payload = {
                "changeType": "created,updated,deleted",
@@ -91,13 +121,21 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
                "expirationDateTime": expiration_time.isoformat(),
                "clientState": "SecretClientState"
             }
+
             old_subscription = OutlookWebhookSubscription.objects.filter(user=user).first()
             if old_subscription:
                 requests.delete(f"{graph_api_endpoint}/{old_subscription.subscription_id}", headers=headers)
                 old_subscription.delete()
-            
+
+            # Make the API call
             response = requests.post(graph_api_endpoint, headers=headers, json=subscription_payload)
+            
+            # --- THIS IS THE NEW DEBUGGING LINE ---
+            print(f"\n\n===== MICROSOFT WEBHOOK RESPONSE =====\nSTATUS CODE: {response.status_code}\nBODY: {response.text}\n==================================\n\n")
+            # ------------------------------------
+
             response.raise_for_status()
+
             subscription_data = response.json()
             OutlookWebhookSubscription.objects.create(
                 user=user,
@@ -105,6 +143,10 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
                 expiration_datetime=parser.parse(subscription_data['expirationDateTime'])
             )
             logger.info(f"SUCCESS: Automatically registered Outlook webhook for {user.username}!")
+
+            # Immediately sync existing Outlook events after login
+            sync_outlook_events(user, token)
+
         except Exception as e:
             logger.error(f"FATAL: Could not register Outlook webhook: {e}", exc_info=True)
 
