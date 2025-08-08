@@ -6,6 +6,9 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
 
+# Use string import for SocialAccount to avoid import cycle in migrations
+# We'll reference it via integer field storing SocialAccount.id in webhook models.
+
 class Event(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     title = models.CharField(max_length=200)
@@ -17,22 +20,26 @@ class Event(models.Model):
     location = models.CharField(max_length=255, blank=True, null=True)
     is_recurring = models.BooleanField(default=False)
 
-    # --- THIS IS THE CRITICAL FIX FOR THE INTEGRITYERROR ---
     source = models.CharField(
         max_length=50,
         choices=[
             ('google', 'Google'),
-            ('outlook', 'Outlook'),
+            ('microsoft', 'Microsoft'),
             ('teams', 'Teams'),
-            ('local', 'Local'), # Add 'local' as a valid choice
+            ('local', 'Local'),
         ],
-        default='local' # Make 'local' the default for new events
+        default='local'
     )
-    # --------------------------------------------------------
 
-    # These fields are specific to synced events and should be optional
-    event_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    # remote event id from provider (may not be globally unique across users)
+    event_id = models.CharField(max_length=255, null=True, blank=True)
     etag = models.CharField(max_length=255, blank=True, null=True)
+
+    # link to a specific synced calendar (optional)
+    synced_calendar = models.ForeignKey('SyncedCalendar', on_delete=models.SET_NULL, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.title} on {self.date}"
@@ -49,18 +56,13 @@ class Event(models.Model):
             if overlapping_events.exists():
                 raise ValidationError("This time slot overlaps with another event for the same user.")
 
-# --- Google Webhook Channel ---
-class GoogleWebhookChannel(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="google_webhook_channel")
-    channel_id = models.CharField(max_length=255, unique=True)
-    resource_id = models.CharField(max_length=255)
-    token = models.CharField(max_length=255, blank=True, null=True)
-    expiration = models.DateTimeField(blank=True, null=True)
+    class Meta:
+        # ensure per-user uniqueness for a remote event id + source
+        unique_together = (('user', 'source', 'event_id'),)
 
-    def __str__(self):
-        return f"Webhook for {self.user.username} ({self.channel_id})"
 
-# --- User Profile for Sync Flag ---
+
+
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     watch_enabled = models.BooleanField(default=False)
@@ -71,30 +73,54 @@ class UserProfile(models.Model):
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
     UserProfile.objects.get_or_create(user=instance)
-    
-# --- THIS IS THE NEW MODEL FOR OUTLOOK ---
-class OutlookWebhookSubscription(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="outlook_webhook_subscription")
-    subscription_id = models.CharField(max_length=255, unique=True)
-    expiration_datetime = models.DateTimeField()
+
+# --- Google Webhook Channel ---
+class GoogleWebhookChannel(models.Model):
+    social_account_id = models.PositiveIntegerField(
+        help_text="allauth SocialAccount.id",
+        null=True,  # allow nulls for existing rows
+        blank=True
+    )
+    channel_id = models.CharField(max_length=255)
+    resource_id = models.CharField(max_length=255)
+    token = models.CharField(max_length=255, blank=True, null=True)
+    expiration = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = (('social_account_id', 'channel_id'),)
 
     def __str__(self):
-        return f"Webhook for {self.user.username} (Outlook)"
-# ----------------------------------------
+        return f"Google Channel {self.channel_id} (social_account_id={self.social_account_id})"
+
+
+class OutlookWebhookSubscription(models.Model):
+    social_account_id = models.PositiveIntegerField(
+        help_text="allauth SocialAccount.id",
+        null=True,  # allow nulls for existing rows
+        blank=True
+    )
+    subscription_id = models.CharField(max_length=255)
+    expiration_datetime = models.DateTimeField()
+
+    class Meta:
+        unique_together = (('social_account_id', 'subscription_id'),)
+
+    def __str__(self):
+        return f"Outlook Sub {self.subscription_id} (social_account_id={self.social_account_id})"
+
 
 class SyncedCalendar(models.Model):
     """
-    This is a central model to track every individual calendar a user
-    has chosen to sync with their Master Calendar account.
+    Track each specific calendar a user has chosen to sync.
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     provider = models.CharField(max_length=50, choices=[('google', 'Google'), ('microsoft', 'Microsoft')])
-    calendar_id = models.CharField(max_length=255) # The unique ID from the provider (e.g., user@gmail.com or a long string)
-    name = models.CharField(max_length=255) # The human-readable name (e.g., "Work Calendar")
+    calendar_id = models.CharField(max_length=255)  # provider's calendar id
+    name = models.CharField(max_length=255)
     is_sync_enabled = models.BooleanField(default=True)
-
+    social_account_id = models.PositiveIntegerField(help_text="allauth SocialAccount.id", null=True, blank=True)
+    
     class Meta:
-        # Ensure a user can only sync a specific calendar once
         unique_together = ('user', 'provider', 'calendar_id')
 
     def __str__(self):

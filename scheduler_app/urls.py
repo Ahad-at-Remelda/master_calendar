@@ -18,6 +18,7 @@ urlpatterns = [
     path('disconnect/microsoft/', views.disconnect_social_account, {'provider': 'microsoft'}, name='disconnect_microsoft'),
     path('select-calendars/<str:provider>/', views.select_calendars_view, name='select_calendars'),
     path('save-calendar-selection/<str:provider>/', views.save_calendar_selection_view, name='save_calendar_selection'),
+    path('redirect-after-login/', views.redirect_after_login, name='redirect-after-login'),
 
 ]
 

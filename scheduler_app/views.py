@@ -31,8 +31,18 @@ from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription,Sync
 from .forms import EventForm
 from datetime import date
 
+from django.shortcuts import redirect
+from django.utils import timezone
+
 logger = logging.getLogger(__name__)
 
+
+def redirect_after_login(request):
+    today = timezone.now()
+
+def redirect_after_login(request):
+    today = timezone.now()
+    return redirect(f'/calendar/{today.year}/{today.month}/')
 def home(request):
     today = date.today()
     context = {'year': today.year, 'month': today.month}
@@ -57,31 +67,26 @@ def add_event(request):
 
 @login_required
 def disconnect_social_account(request, provider):
-    """
-    Disconnects a social account (Google or Microsoft) and deletes all
-    associated events from that source.
-    """
     try:
-        # Find the social account to disconnect
         social_account = SocialAccount.objects.get(user=request.user, provider=provider)
-        
-        # Determine the source name to use for deleting events
-        source_name = 'outlook' if provider == 'microsoft' else provider
-        
-        # Delete all events from this source for this user
-        deleted_count, _ = Event.objects.filter(user=request.user, source=source_name).delete()
-        
-        # Delete the social account itself
+        # Delete SyncedCalendars and their events for this social account
+        synced_calendars = SyncedCalendar.objects.filter(user=request.user, social_account_id=social_account.id)
+        for sc in synced_calendars:
+            Event.objects.filter(user=request.user, synced_calendar=sc).delete()
+            sc.delete()
+
+        # Remove webhook entries for this social account
+        GoogleWebhookChannel.objects.filter(social_account_id=social_account.id).delete()
+        OutlookWebhookSubscription.objects.filter(social_account_id=social_account.id).delete()
+
+        # Finally delete the social account
         social_account.delete()
-        
-        messages.success(request, f"Successfully disconnected your {provider.capitalize()} account and removed {deleted_count} event(s).")
-        
+        messages.success(request, f"Successfully disconnected your {provider.capitalize()} account and removed associated synced events.")
     except SocialAccount.DoesNotExist:
         messages.error(request, f"You do not have a {provider.capitalize()} account connected.")
     except Exception as e:
         messages.error(request, f"An error occurred: {e}")
 
-    # Redirect back to the last calendar page the user was on
     return redirect(request.META.get('HTTP_REFERER', '/'))
 
 
@@ -155,29 +160,34 @@ def calendar_view(request, year, month):
 # --- THIS IS THE FINAL, CORRECTED GOOGLE WEBHOOK RECEIVER ---
 @csrf_exempt
 def google_webhook_receiver(request):
-    """
-    This view is now more robust and guarantees it always returns an HttpResponse.
-    """
-    channel_id = request.headers.get('X-Goog-Channel-ID')
-    resource_state = request.headers.get('X-Goog-Resource-State')
+    channel_id = request.headers.get('X-Goog-Channel-ID') or request.META.get('HTTP_X_GOOG_CHANNEL_ID')
+    resource_state = request.headers.get('X-Goog-Resource-State') or request.META.get('HTTP_X_GOOG_RESOURCE_STATE')
     logger.info(f"Received Google webhook: Channel={channel_id}, State={resource_state}")
 
     if not channel_id:
-        return HttpResponse("Notification ignored: Missing Channel ID.", status=200)
+        return HttpResponse("Missing Channel ID", status=200)
 
     try:
         webhook = GoogleWebhookChannel.objects.get(channel_id=channel_id)
-        user = webhook.user
     except GoogleWebhookChannel.DoesNotExist:
-        logger.warning(f"Received webhook for an unknown channel_id: {channel_id}")
-        return HttpResponse("Unknown channel ID", status=200)
+        logger.warning(f"Unknown Google channel {channel_id}")
+        return HttpResponse("Unknown channel", status=200)
 
-    if resource_state not in ['exists', 'sync']:
+    # Look up SocialAccount by stored id to get the correct SocialToken and user
+    try:
+        social_acc = SocialAccount.objects.get(id=webhook.social_account_id)
+    except SocialAccount.DoesNotExist:
+        logger.error(f"No SocialAccount found with id {webhook.social_account_id}")
+        return HttpResponse("No social account", status=200)
+
+    user = social_acc.user
+
+    if resource_state not in ['exists', 'sync', 'updated', 'deleted']:
         logger.info(f"Notification ignored: state is '{resource_state}'.")
-        return HttpResponse("Notification ignored: state is not 'exists' or 'sync'.", status=200)
+        return HttpResponse("Notification ignored", status=200)
 
     try:
-        token = SocialToken.objects.get(account__user=user, account__provider='google')
+        token = SocialToken.objects.get(account=social_acc)
         credentials = Credentials(
             token=token.token, refresh_token=token.token_secret,
             token_uri='https://oauth2.googleapis.com/token',
@@ -191,90 +201,127 @@ def google_webhook_receiver(request):
         service = build('calendar', 'v3', credentials=credentials)
         events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
         google_events_data = events_result.get('items', [])
-        
-        google_event_ids = {event_data['id'] for event_data in google_events_data}
+        google_event_ids = {e['id'] for e in google_events_data if e.get('id')}
 
+        # Upsert events into DB under the app user and mark synced_calendar if present
         for event_data in google_events_data:
             event_id = event_data.get('id')
-            if not event_id: continue
+            if not event_id:
+                continue
             start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
-            if not start_raw: continue
+            if not start_raw:
+                continue
             start_time = parser.parse(start_raw)
-            end_time = parser.parse(event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')) if event_data.get('end') else None
+            end_raw = event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')
+            end_time = parser.parse(end_raw) if end_raw else None
+
             Event.objects.update_or_create(
-                user=user, event_id=event_id,
+                user=user,
+                source='google',
+                event_id=event_id,
                 defaults={
                     'title': event_data.get('summary', 'No Title'),
                     'description': event_data.get('description', ''),
                     'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
-                    'source': 'google', 'etag': event_data.get('etag', ''),
+                    'etag': event_data.get('etag', ''),
                     'meeting_link': event_data.get('hangoutLink', ''),
                     'location': event_data.get('location', ''),
                     'is_recurring': 'recurringEventId' in event_data
                 }
             )
-        
+
+        # Remove deleted events (for this user + provider)
         Event.objects.filter(user=user, source='google').exclude(event_id__in=google_event_ids).delete()
 
+        # Notify via channels
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
-        logger.info(f"Sync complete. Sent update to WebSocket for user {user.id}")
+        logger.info(f"Google sync complete. Sent update to WebSocket for user {user.id}")
 
     except Exception as e:
-        logger.error(f"Error syncing events for {user.username} via webhook: {e}", exc_info=True)
+        logger.error(f"Error syncing Google webhook for social_acc {webhook.social_account_id}: {e}", exc_info=True)
         return HttpResponse("Sync failure", status=500)
 
-    return HttpResponse("Webhook processed successfully.", status=200)
+    return HttpResponse("OK", status=200)
+
 
 @csrf_exempt
 def outlook_webhook_receiver(request):
-    # (This view is correct and needs no changes)
-    print("Received Outlook entry request")
     validation_token = request.GET.get('validationToken')
     if validation_token:
         logger.info("Received Outlook validation request. Responding with token.")
         return HttpResponse(validation_token, content_type='text/plain', status=200)
+
     try:
-        notification = json.loads(request.body)
-        print(f"Received Outlook notification: {notification}")
-        subscription_id = notification['value'][0]['subscriptionId']
-        logger.info(f"Received Outlook Webhook notification for subscription: {subscription_id}")
-        webhook_subscription = get_object_or_404(OutlookWebhookSubscription, subscription_id=subscription_id)
-        user = webhook_subscription.user
-        print(f"User for subscription {subscription_id}: {user.username}")
-        token = SocialToken.objects.get(account__user=user, account__provider='MasterCalendarClient')
-        print(f"Token for user {user.username}: {token.token}")
-        headers = {'Authorization': f'Bearer {token.token}'}
-        graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
-        response = requests.get(graph_api_endpoint, headers=headers)
-        response.raise_for_status()
-        outlook_events_data = response.json().get('value', [])
-        logger.info(f"Fetched {len(outlook_events_data)} total events from Outlook for user {user.username} after webhook.")
-        outlook_event_ids_in_sync = []
-        for event_data in outlook_events_data:
-            event_id = event_data.get('id')
-            if not event_id: continue
-            outlook_event_ids_in_sync.append(event_id)
-            start_raw = event_data.get('start', {}).get('dateTime')
-            if not start_raw: continue
-            start_time = parser.parse(start_raw)
-            end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
-            Event.objects.update_or_create(
-                user=user, event_id=event_id,
-                defaults={
-                    'title': event_data.get('subject', 'No Title'),
-                    'description': event_data.get('bodyPreview', ''),
-                    'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
-                    'source': 'outlook', 'etag': event_data.get('@odata.etag', ''),
-                    'location': event_data.get('location', {}).get('displayName', ''),
-                }
-            )
-        Event.objects.filter(user=user, source='outlook').exclude(event_id__in=outlook_event_ids_in_sync).delete()
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
-        logger.info(f"Outlook sync complete. Sent update to WebSocket for user {user.id}")
+        notification = json.loads(request.body.decode('utf-8') or '{}')
+        if not notification:
+            logger.warning("Empty Outlook notification body")
+            return HttpResponse(status=200)
+
+        # The notification includes subscriptionId; there may be multiple items
+        for notif in notification.get('value', []):
+            subscription_id = notif.get('subscriptionId')
+            if not subscription_id:
+                continue
+            try:
+                sub = OutlookWebhookSubscription.objects.get(subscription_id=subscription_id)
+            except OutlookWebhookSubscription.DoesNotExist:
+                logger.warning(f"No Outlook subscription found with id {subscription_id}")
+                continue
+
+            # Find the social account and token
+            try:
+                social_acc = SocialAccount.objects.get(id=sub.social_account_id)
+            except SocialAccount.DoesNotExist:
+                logger.error(f"No SocialAccount for id {sub.social_account_id}")
+                continue
+
+            user = social_acc.user
+            # Use the token for this social account
+            try:
+                token = SocialToken.objects.get(account=social_acc)
+                headers = {'Authorization': f'Bearer {token.token}'}
+                graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
+                response = requests.get(graph_api_endpoint, headers=headers)
+                response.raise_for_status()
+                outlook_events_data = response.json().get('value', [])
+            except Exception as e:
+                logger.error(f"Error fetching Outlook events for social_account {sub.social_account_id}: {e}", exc_info=True)
+                continue
+
+            outlook_event_ids_in_sync = []
+            for event_data in outlook_events_data:
+                event_id = event_data.get('id')
+                if not event_id:
+                    continue
+                outlook_event_ids_in_sync.append(event_id)
+                start_raw = event_data.get('start', {}).get('dateTime')
+                if not start_raw:
+                    continue
+                start_time = parser.parse(start_raw)
+                end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
+                Event.objects.update_or_create(
+                    user=user,
+                    source='microsoft',
+                    event_id=event_id,
+                    defaults={
+                        'title': event_data.get('subject', 'No Title'),
+                        'description': event_data.get('bodyPreview', ''),
+                        'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
+                        'etag': event_data.get('@odata.etag', ''),
+                        'location': event_data.get('location', {}).get('displayName', ''),
+                    }
+                )
+
+            Event.objects.filter(user=user, source='microsoft').exclude(event_id__in=outlook_event_ids_in_sync).delete()
+
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
+            logger.info(f"Outlook sync complete. Sent update to WebSocket for user {user.id}")
+
     except Exception as e:
         logger.error(f"Error processing Outlook webhook: {e}", exc_info=True)
+        # still return 200 so provider considers notification delivered
     return HttpResponse(status=200)
 
 

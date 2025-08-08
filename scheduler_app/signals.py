@@ -17,6 +17,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from dateutil import parser
 from allauth.account.adapter import get_adapter
+from datetime import datetime, timezone
 
 from .models import GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile, Event
 
@@ -73,26 +74,36 @@ def sync_outlook_events(user, token):
         logger.error(f"Failed to sync Outlook events for {user.username}: {e}", exc_info=True)
 # ---------------------------------------------------
 
+
 @receiver(social_account_added)
 @receiver(social_account_updated)
 def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
-    user = sociallogin.user
+    """
+    Register provider push notifications mapped to the SocialAccount that was just added or updated.
+    We store sociallogin.account.id (an integer) into the webhook rows so incoming webhooks can
+    find the exact SocialAccount and therefore the correct app User and token.
+    """
+    # Prefer the logged-in app user if present (this is important for process=connect flows)
+    app_user = request.user if (request and hasattr(request, "user") and request.user.is_authenticated) else sociallogin.user
     provider = sociallogin.account.provider
 
+    # Only run in debug (your original check) — you can remove this guard for prod
     if not settings.DEBUG:
         return
 
-    logger.info(f"Signal received for '{provider}' user: {user.username}. Setting up webhook.")
+    logger.info(f"Signal received for '{provider}' user: {app_user.username}. Setting up webhook.")
 
     try:
         public_url = settings.NGROK_URL
         if not public_url:
-            raise ValueError("NGROK_URL is not set in your settings.py file.")
+            raise ValueError("NGROK_URL is not set in settings.py")
     except (AttributeError, ValueError) as e:
-        logger.error(f"FATAL: NGROK_URL not configured. Aborting webhook setup. Error: {e}")
+        logger.error(f"NGROK_URL not configured. Aborting webhook setup. Error: {e}")
         return
 
-    # --- THIS IS THE CORRECTED LOGIC ---
+    # The social account id we will persist
+    social_account_id = int(sociallogin.account.id)
+
     if provider == 'google':
         try:
             token = sociallogin.token
@@ -100,35 +111,58 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
                 token=token.token,
                 refresh_token=token.token_secret,
                 token_uri='https://oauth2.googleapis.com/token',
-                client_id=sociallogin.token.app.client_id,
-                client_secret=sociallogin.token.app.secret
+                client_id=token.app.client_id,
+                client_secret=token.app.secret
             )
             service = build('calendar', 'v3', credentials=credentials)
             webhook_url = public_url + reverse('google_webhook')
             channel_uuid = str(uuid.uuid4())
             watch_request_body = {'id': channel_uuid, 'type': 'web_hook', 'address': webhook_url}
 
-            old_channel = GoogleWebhookChannel.objects.filter(user=user).first()
-            if old_channel:
-                service.channels().stop(body={'id': old_channel.channel_id, 'resourceId': old_channel.resource_id}).execute()
-                old_channel.delete()
+            # Remove any old channels tied to this social account
+            old_channels = GoogleWebhookChannel.objects.filter(social_account_id=social_account_id)
+            for c in old_channels:
+                try:
+                    service.channels().stop(body={'id': c.channel_id, 'resourceId': c.resource_id}).execute()
+                except Exception:
+                    logger.exception("Error stopping old Google channel (continuing)")
+                c.delete()
 
             response = service.events().watch(calendarId='primary', body=watch_request_body).execute()
+            expiration_val = response.get('expiration')
+            expiration_dt = None
+            if expiration_val:
+                try:
+                    # If it's a number (milliseconds), convert to datetime
+                    if str(expiration_val).isdigit():
+                        expiration_dt = datetime.fromtimestamp(int(expiration_val) / 1000, tz=timezone.utc)
+                    else:
+                        expiration_dt = parser.parse(expiration_val)
+                except Exception as e:
+                    logger.warning(f"Could not parse expiration value '{expiration_val}': {e}")
+
             GoogleWebhookChannel.objects.create(
-                user=user,
+                social_account_id=social_account_id,
                 channel_id=response['id'],
-                resource_id=response['resourceId']
+                resource_id=response['resourceId'],
+                token=token.token,
+                expiration=expiration_dt
             )
-            logger.info(f"SUCCESS: Automatically registered Google webhook for {user.username}!")
+            logger.info(f"SUCCESS: Registered Google webhook for social_account_id={social_account_id}")
 
         except Exception as e:
-            logger.error(f"FATAL: Could not register Google webhook: {e}", exc_info=True)
+            logger.error(f"Could not register Google webhook: {e}", exc_info=True)
 
-    elif provider == 'MasterCalendarClient':
+    elif provider in ('microsoft', 'MasterCalendarClient'):
         try:
-            token = sociallogin.token.token
+            # Get token string
+            token_str = sociallogin.token.token if hasattr(sociallogin, 'token') else None
+            if not token_str:
+                logger.warning("No token available for Microsoft sociallogin; skipping subscription creation.")
+                return
+
             graph_api_endpoint = 'https://graph.microsoft.com/v1.0/subscriptions'
-            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+            headers = {'Authorization': f'Bearer {token_str}', 'Content-Type': 'application/json'}
             expiration_time = now() + timedelta(days=2)
             subscription_payload = {
                "changeType": "created,updated,deleted",
@@ -138,44 +172,29 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
                "clientState": "SecretClientState"
             }
 
-            old_subscription = OutlookWebhookSubscription.objects.filter(user=user).first()
-            if old_subscription:
-                requests.delete(f"{graph_api_endpoint}/{old_subscription.subscription_id}", headers=headers)
-                old_subscription.delete()
+            # Remove old subscriptions for this social account (if any)
+            old_subs = OutlookWebhookSubscription.objects.filter(social_account_id=social_account_id)
+            for s in old_subs:
+                try:
+                    requests.delete(f"{graph_api_endpoint}/{s.subscription_id}", headers=headers)
+                except Exception:
+                    logger.exception("Error deleting old Outlook subscription (continuing)")
+                s.delete()
 
-            # Make the API call
             response = requests.post(graph_api_endpoint, headers=headers, json=subscription_payload)
-            
-            # --- THIS IS THE NEW DEBUGGING LINE ---
             print(f"\n\n===== MICROSOFT WEBHOOK RESPONSE =====\nSTATUS CODE: {response.status_code}\nBODY: {response.text}\n==================================\n\n")
-            # ------------------------------------
-
             response.raise_for_status()
-
             subscription_data = response.json()
             OutlookWebhookSubscription.objects.create(
-                user=user,
+                social_account_id=social_account_id,
                 subscription_id=subscription_data['id'],
                 expiration_datetime=parser.parse(subscription_data['expirationDateTime'])
             )
-            logger.info(f"SUCCESS: Automatically registered Outlook webhook for {user.username}!")
+            logger.info(f"SUCCESS: Registered Outlook webhook for social_account_id={social_account_id}")
 
-            # Immediately sync existing Outlook events after login
-            sync_outlook_events(user, token)
+            # Immediately sync events for this social account
+            # We pass the app_user (the logged-in app user) so the events are stored under them
+            sync_outlook_events(app_user, token_str)
 
         except Exception as e:
-            logger.error(f"FATAL: Could not register Outlook webhook: {e}", exc_info=True)
-
-@receiver(user_signed_up)
-def create_profile_on_social_signup(request, user, **kwargs):
-    UserProfile.objects.get_or_create(user=user)
-    
-    
-@receiver(social_account_added)
-def on_social_account_added(request, sociallogin, **kwargs):
-    """
-    This signal runs when a user connects a NEW social account.
-    """
-    # Store a flag in the session.
-    request.session['new_social_account_provider'] = sociallogin.account.provider
-    logger.info(f"New social account '{sociallogin.account.provider}' added for {sociallogin.user}. Setting session flag.")
+            logger.error(f"Could not register Outlook webhook: {e}", exc_info=True)

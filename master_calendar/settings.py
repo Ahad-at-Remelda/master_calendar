@@ -148,3 +148,4 @@ LOGGING = {
 }
 
 SOCIALACCOUNT_ADAPTER = 'scheduler_app.adapter.CustomSocialAccountAdapter'
+LOGIN_REDIRECT_URL = '/redirect-after-login/'
