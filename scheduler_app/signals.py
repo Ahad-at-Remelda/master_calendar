@@ -16,46 +16,62 @@ from allauth.account.signals import user_signed_up
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from dateutil import parser
+from allauth.account.adapter import get_adapter
 
 from .models import GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile, Event
 
 logger = logging.getLogger(__name__)
 
 def sync_outlook_events(user, token):
-    """Helper function to perform a full sync of Outlook events."""
+    """
+    Fetch all Outlook events for the given user and save them to the DB,
+    ensuring they are linked to the correct user.
+    """
     try:
         headers = {'Authorization': f'Bearer {token}'}
         graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
         response = requests.get(graph_api_endpoint, headers=headers)
         response.raise_for_status()
+
         outlook_events_data = response.json().get('value', [])
-        logger.info(f"Fetched {len(outlook_events_data)} Outlook events for {user.username}")
+        logger.info(f"Fetched {len(outlook_events_data)} Outlook events for user: {user.username}")
+
         outlook_event_ids = [event_data.get('id') for event_data in outlook_events_data if event_data.get('id')]
 
         for event_data in outlook_events_data:
             event_id = event_data.get('id')
             if not event_id: continue
+            
             start_raw = event_data.get('start', {}).get('dateTime')
             if not start_raw: continue
+            
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
+
+            # The user parameter passed to this function is the correct,
+            # logged-in user. We use it here to save the event.
             Event.objects.update_or_create(
-                user=user, event_id=event_id,
+                user=user, # <-- This ensures the event is linked to the correct user
+                event_id=event_id,
+                source='outlook',
                 defaults={
                     'title': event_data.get('subject', 'No Title'),
                     'description': event_data.get('bodyPreview', ''),
                     'date': start_time.date(),
                     'start_time': start_time,
                     'end_time': end_time,
-                    'source': 'outlook',
                     'etag': event_data.get('@odata.etag', ''),
                     'location': event_data.get('location', {}).get('displayName', ''),
                 }
             )
+
+        # Remove old Outlook events for this specific user
         Event.objects.filter(user=user, source='outlook').exclude(event_id__in=outlook_event_ids).delete()
-        logger.info(f"Outlook events synced successfully for {user.username}")
+        logger.info(f"Outlook events successfully synced for user: {user.username}")
+
     except Exception as e:
         logger.error(f"Failed to sync Outlook events for {user.username}: {e}", exc_info=True)
+# ---------------------------------------------------
 
 @receiver(social_account_added)
 @receiver(social_account_updated)
@@ -153,3 +169,13 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
 @receiver(user_signed_up)
 def create_profile_on_social_signup(request, user, **kwargs):
     UserProfile.objects.get_or_create(user=user)
+    
+    
+@receiver(social_account_added)
+def on_social_account_added(request, sociallogin, **kwargs):
+    """
+    This signal runs when a user connects a NEW social account.
+    """
+    # Store a flag in the session.
+    request.session['new_social_account_provider'] = sociallogin.account.provider
+    logger.info(f"New social account '{sociallogin.account.provider}' added for {sociallogin.user}. Setting session flag.")

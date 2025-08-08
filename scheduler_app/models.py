@@ -81,3 +81,21 @@ class OutlookWebhookSubscription(models.Model):
     def __str__(self):
         return f"Webhook for {self.user.username} (Outlook)"
 # ----------------------------------------
+
+class SyncedCalendar(models.Model):
+    """
+    This is a central model to track every individual calendar a user
+    has chosen to sync with their Master Calendar account.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    provider = models.CharField(max_length=50, choices=[('google', 'Google'), ('microsoft', 'Microsoft')])
+    calendar_id = models.CharField(max_length=255) # The unique ID from the provider (e.g., user@gmail.com or a long string)
+    name = models.CharField(max_length=255) # The human-readable name (e.g., "Work Calendar")
+    is_sync_enabled = models.BooleanField(default=True)
+
+    class Meta:
+        # Ensure a user can only sync a specific calendar once
+        unique_together = ('user', 'provider', 'calendar_id')
+
+    def __str__(self):
+        return f"{self.name} ({self.provider}) for {self.user.username}"
