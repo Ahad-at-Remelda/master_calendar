@@ -21,8 +21,8 @@ urlpatterns = [
     path('google-webhook/', views.google_webhook_receiver, name='google_webhook'),
     path('outlook-webhook/', views.outlook_webhook_receiver, name='outlook_webhook'),
     path('disconnect/<int:account_id>/', views.disconnect_social_account, name='disconnect_social_account'),
-    path('select-calendars/<str:provider>/', views.select_calendars_view, name='select_calendars'),
-    path('save-calendar-selection/<str:provider>/', views.save_calendar_selection_view, name='save_calendar_selection'),
+    #path('select-calendars/<str:provider>/', views.select_calendars_view, name='select_calendars'),
+    #path('save-calendar-selection/<str:provider>/', views.save_calendar_selection_view, name='save_calendar_selection'),
     path('redirect-after-login/', views.redirect_after_login, name='redirect_after_login'),
     path('api/token-login/', obtain_auth_token, name='api_token_auth'),
 
