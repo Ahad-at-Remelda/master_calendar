@@ -5,6 +5,8 @@ from django.conf import settings
 
 # scheduler_app/views.py
 
+from rest_framework.authtoken.models import Token
+
 import datetime
 import calendar as cal
 import logging
@@ -37,12 +39,17 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def redirect_after_login(request):
-    today = timezone.now()
 
+@login_required
 def redirect_after_login(request):
+    """
+    This is the single, final destination after any successful login or social connect.
+    It simply redirects the user to the current month's calendar.
+    """
     today = timezone.now()
-    return redirect(f'/calendar/{today.year}/{today.month}/')
+    logger.info(f"Redirecting user {request.user.username} to current month: {today.month}/{today.year}")
+    return redirect('calendar', year=today.year, month=today.month)
+
 def home(request):
     today = date.today()
     context = {'year': today.year, 'month': today.month}
@@ -66,27 +73,35 @@ def add_event(request):
     return render(request, 'scheduler_app/add_event.html', context)
 
 @login_required
-def disconnect_social_account(request, provider):
+def disconnect_social_account(request, account_id):
+    """
+    Disconnects a specific social account by its primary key ID.
+    """
     try:
-        social_account = SocialAccount.objects.get(user=request.user, provider=provider)
-        # Delete SyncedCalendars and their events for this social account
-        synced_calendars = SyncedCalendar.objects.filter(user=request.user, social_account_id=social_account.id)
-        for sc in synced_calendars:
-            Event.objects.filter(user=request.user, synced_calendar=sc).delete()
-            sc.delete()
+        # Find the specific SocialAccount ensuring it belongs to the logged-in user for security.
+        social_account = get_object_or_404(SocialAccount, id=account_id, user=request.user)
+        provider_name = social_account.provider.capitalize()
 
-        # Remove webhook entries for this social account
-        GoogleWebhookChannel.objects.filter(social_account_id=social_account.id).delete()
-        OutlookWebhookSubscription.objects.filter(social_account_id=social_account.id).delete()
+        # Delete associated events first
+        Event.objects.filter(user=request.user, source=social_account.provider, event_id__isnull=False).delete()
 
-        # Finally delete the social account
+        # Remove related webhook entries
+        if social_account.provider == 'google':
+            GoogleWebhookChannel.objects.filter(social_account_id=social_account.id).delete()
+        elif social_account.provider == 'microsoft':
+            OutlookWebhookSubscription.objects.filter(social_account_id=social_account.id).delete()
+
+        # Finally, delete the social account connection itself
         social_account.delete()
-        messages.success(request, f"Successfully disconnected your {provider.capitalize()} account and removed associated synced events.")
-    except SocialAccount.DoesNotExist:
-        messages.error(request, f"You do not have a {provider.capitalize()} account connected.")
-    except Exception as e:
-        messages.error(request, f"An error occurred: {e}")
+        
+        messages.success(request, f"Successfully disconnected your {provider_name} account.")
 
+    except SocialAccount.DoesNotExist:
+        messages.error(request, "The account you tried to disconnect does not exist.")
+    except Exception as e:
+        messages.error(request, f"An error occurred while disconnecting the account: {e}")
+
+    # Redirect back to the page the user was on
     return redirect(request.META.get('HTTP_REFERER', '/'))
 
 
@@ -127,10 +142,6 @@ def calendar_view(request, year, month):
                     'source': event.source,
                     'start_time': start_time_str
                 })
-
-    # Get the list of connected accounts to pass to the template for the UI
-    connected_accounts = SocialAccount.objects.filter(user=request.user).values_list('provider', flat=True)
-
     days_data = []
     for _ in range(start_day_of_week):
         days_data.append({'is_placeholder': True})
@@ -140,19 +151,26 @@ def calendar_view(request, year, month):
             'events': events_by_day.get(day, []),
             'is_placeholder': False
         })
-        
-    context = {
-        'year': year,
-        'month': month,
-        'days_data': days_data,
-        'prev_year': prev_year,
-        'prev_month': prev_month,
-        'next_year': next_year,
-        'next_month': next_month,
-        # Pass the connection status to the template for the sidebar buttons
-        'google_connected': 'google' in connected_accounts,
-        'outlook_connected': 'microsoft' in connected_accounts or 'MasterCalendarClient' in connected_accounts,
+
+    # Get the list of connected accounts to pass to the template for the UI
+    all_accounts = SocialAccount.objects.filter(user=request.user)
+    connected_accounts = {
+        'google': all_accounts.filter(provider='google'),
+        'microsoft': all_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient'])
     }
+    
+    context = {
+            'year': year,
+            'month': month,
+            # THIS IS THE FIX: We add the month's name to the context.
+            'month_name': cal.month_name[month],
+            'days_data': days_data,
+            'prev_year': prev_year,
+            'prev_month': prev_month,
+            'next_year': next_year,
+            'next_month': next_month,
+            'connected_accounts': connected_accounts,
+        }
     return render(request, 'scheduler_app/calendar.html', context)
 
 

@@ -7,7 +7,7 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL= 'https://ab703da27e16.ngrok-free.app'
+NGROK_URL= 'https://29eee4c780a5.ngrok-free.app'
 
 # --- THIS IS THE CRITICAL FIX ---
 # Hostnames must NOT include 'http://' or 'https://'.
@@ -15,11 +15,11 @@ NGROK_URL= 'https://ab703da27e16.ngrok-free.app'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    'ab703da27e16.ngrok-free.app',
+    '29eee4c780a5.ngrok-free.app',
 ]
 # --------------------------------
 CSRF_TRUSTED_ORIGINS = [
-    'https://ab703da27e16.ngrok-free.app',
+    'https://29eee4c780a5.ngrok-free.app',
     'https://*.ngrok-free.app',
 ]
 
@@ -30,15 +30,19 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'channels',
-    'scheduler_app.apps.SchedulerAppConfig', # <-- THIS IS THE FIX
-
     'django.contrib.sites',
+    'rest_framework',
+    'rest_framework.authtoken',
+    # Third-Party Apps (Second)
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
-    'allauth.socialaccount.providers.google', 
+    'allauth.socialaccount.providers.google',
     'allauth.socialaccount.providers.microsoft',
+    'channels',
+
+    # Your Local Apps (Last)
+    'scheduler_app.apps.SchedulerAppConfig',
 ]
 
 MIDDLEWARE = [
@@ -56,12 +60,14 @@ ROOT_URLCONF = 'master_calendar.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [], 'APP_DIRS': True,
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'django.template.context_processors.request',
             ],
         },
     },
@@ -101,8 +107,7 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 SITE_ID = 1
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
+
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
@@ -148,4 +153,12 @@ LOGGING = {
 }
 
 SOCIALACCOUNT_ADAPTER = 'scheduler_app.adapter.CustomSocialAccountAdapter'
-LOGIN_REDIRECT_URL = '/redirect-after-login/'
+LOGIN_REDIRECT_URL = 'redirect_after_login'
+LOGOUT_REDIRECT_URL = '/' 
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}

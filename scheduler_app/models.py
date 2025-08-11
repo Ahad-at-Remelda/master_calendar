@@ -57,8 +57,17 @@ class Event(models.Model):
                 raise ValidationError("This time slot overlaps with another event for the same user.")
 
     class Meta:
-        # ensure per-user uniqueness for a remote event id + source
-        unique_together = (('user', 'source', 'event_id'),)
+        # THIS IS THE CRITICAL FIX:
+        # We replace unique_together with a more flexible constraint.
+        # This ensures that for external events (Google/Outlook), the combination
+        # of user, source, and event_id is unique. It correctly allows multiple
+        # local events where event_id is NULL.
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'source', 'event_id'],
+                name='unique_external_event_for_user'
+            )
+        ]
 
 
 

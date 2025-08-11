@@ -10,136 +10,166 @@ from django.dispatch import receiver
 from django.urls import reverse
 from django.utils.timezone import now
 
-from allauth.socialaccount.signals import social_account_updated, social_account_added
-from allauth.account.signals import user_signed_up
+# Correct, specific imports for allauth signals and models
+from allauth.socialaccount.models import SocialToken, SocialLogin
+from allauth.socialaccount.signals import social_account_added
 
+# Correct, specific imports for Google API
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+
 from dateutil import parser
-from allauth.account.adapter import get_adapter
 from datetime import datetime, timezone
 
-from .models import GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile, Event
+from .models import GoogleWebhookChannel, OutlookWebhookSubscription, Event
 
 logger = logging.getLogger(__name__)
 
-def sync_outlook_events(user, token):
+
+def sync_google_events(user, token: SocialToken):
     """
-    Fetch all Outlook events for the given user and save them to the DB,
-    ensuring they are linked to the correct user.
+    Fetches all Google events for the given user's token and saves them to the DB.
+    This is called ONLY when a new account is connected.
     """
     try:
-        headers = {'Authorization': f'Bearer {token}'}
+        credentials = Credentials(
+            token=token.token,
+            refresh_token=token.token_secret,
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=token.app.client_id,
+            client_secret=token.app.secret
+        )
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            token.token = credentials.token
+            token.token_secret = credentials.refresh_token or token.token_secret
+            token.save()
+
+        service = build('calendar', 'v3', credentials=credentials)
+        events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
+        google_events_data = events_result.get('items', [])
+        logger.info(f"[Initial Sync] Fetched {len(google_events_data)} Google events for Django user: {user.username}")
+
+        google_event_ids_from_api = {event_data['id'] for event_data in google_events_data if 'id' in event_data}
+
+        for event_data in google_events_data:
+            event_id = event_data.get('id')
+            if not event_id: continue
+            
+            start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
+            if not start_raw: continue
+
+            start_time = parser.parse(start_raw)
+            end_raw = event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')
+            end_time = parser.parse(end_raw) if end_raw else None
+
+            Event.objects.update_or_create(
+                user=user,
+                source='google',
+                event_id=event_id,
+                defaults={
+                    'title': event_data.get('summary', 'No Title'),
+                    'description': event_data.get('description', ''),
+                    'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
+                    'etag': event_data.get('etag', ''),
+                    'meeting_link': event_data.get('hangoutLink', ''),
+                    'location': event_data.get('location', ''),
+                    'is_recurring': 'recurringEventId' in event_data,
+                }
+            )
+
+        Event.objects.filter(user=user, source='google', event_id__isnull=False).exclude(event_id__in=google_event_ids_from_api).delete()
+        logger.info(f"[Initial Sync] Google events successfully synced for Django user: {user.username}")
+
+    except Exception as e:
+        logger.error(f"[Initial Sync] Failed to sync Google events for {user.username}: {e}", exc_info=True)
+
+
+def sync_outlook_events(user, token_str: str):
+    """
+    Fetches all Outlook events for the given user and saves them to the DB.
+    This is called ONLY when a new account is connected.
+    """
+    try:
+        headers = {'Authorization': f'Bearer {token_str}'}
         graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
         response = requests.get(graph_api_endpoint, headers=headers)
         response.raise_for_status()
 
         outlook_events_data = response.json().get('value', [])
-        logger.info(f"Fetched {len(outlook_events_data)} Outlook events for user: {user.username}")
+        logger.info(f"[Initial Sync] Fetched {len(outlook_events_data)} Outlook events for Django user: {user.username}")
 
-        outlook_event_ids = [event_data.get('id') for event_data in outlook_events_data if event_data.get('id')]
+        outlook_event_ids_from_api = {event_data.get('id') for event_data in outlook_events_data if event_data.get('id')}
 
         for event_data in outlook_events_data:
             event_id = event_data.get('id')
             if not event_id: continue
-            
+
             start_raw = event_data.get('start', {}).get('dateTime')
             if not start_raw: continue
             
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
 
-            # The user parameter passed to this function is the correct,
-            # logged-in user. We use it here to save the event.
             Event.objects.update_or_create(
-                user=user, # <-- This ensures the event is linked to the correct user
+                user=user,
+                source='microsoft',
                 event_id=event_id,
-                source='outlook',
                 defaults={
                     'title': event_data.get('subject', 'No Title'),
                     'description': event_data.get('bodyPreview', ''),
-                    'date': start_time.date(),
-                    'start_time': start_time,
-                    'end_time': end_time,
+                    'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
                     'etag': event_data.get('@odata.etag', ''),
                     'location': event_data.get('location', {}).get('displayName', ''),
                 }
             )
 
-        # Remove old Outlook events for this specific user
-        Event.objects.filter(user=user, source='outlook').exclude(event_id__in=outlook_event_ids).delete()
-        logger.info(f"Outlook events successfully synced for user: {user.username}")
+        Event.objects.filter(user=user, source='microsoft', event_id__isnull=False).exclude(event_id__in=outlook_event_ids_from_api).delete()
+        logger.info(f"[Initial Sync] Outlook events successfully synced for Django user: {user.username}")
 
     except Exception as e:
-        logger.error(f"Failed to sync Outlook events for {user.username}: {e}", exc_info=True)
-# ---------------------------------------------------
+        logger.error(f"[Initial Sync] Failed to sync Outlook events for {user.username}: {e}", exc_info=True)
 
 
 @receiver(social_account_added)
-@receiver(social_account_updated)
-def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
+def handle_social_account_added(request, sociallogin: SocialLogin, **kwargs):
     """
-    Register provider push notifications mapped to the SocialAccount that was just added or updated.
-    We store sociallogin.account.id (an integer) into the webhook rows so incoming webhooks can
-    find the exact SocialAccount and therefore the correct app User and token.
+    This signal handler fires ONLY when a new social account is CONNECTED to a user.
+    It does NOT fire on a simple login. This is the correct place to trigger
+    the initial sync and webhook setup.
     """
-    # Prefer the logged-in app user if present (this is important for process=connect flows)
-    app_user = request.user if (request and hasattr(request, "user") and request.user.is_authenticated) else sociallogin.user
-    provider = sociallogin.account.provider
-
-    # Only run in debug (your original check) — you can remove this guard for prod
-    if not settings.DEBUG:
+    if not (request and hasattr(request, "user") and request.user.is_authenticated):
+        logger.warning("Social account added signal received without an authenticated user in the request. Aborting.")
         return
-
-    logger.info(f"Signal received for '{provider}' user: {app_user.username}. Setting up webhook.")
+        
+    app_user = request.user
+    provider = sociallogin.account.provider
+    logger.info(f"Signal `social_account_added` received for provider '{provider}'. Syncing events for Django user '{app_user.username}'.")
 
     try:
         public_url = settings.NGROK_URL
         if not public_url:
             raise ValueError("NGROK_URL is not set in settings.py")
-    except (AttributeError, ValueError) as e:
-        logger.error(f"NGROK_URL not configured. Aborting webhook setup. Error: {e}")
-        return
+            
+        social_account_id = int(sociallogin.account.id)
 
-    # The social account id we will persist
-    social_account_id = int(sociallogin.account.id)
-
-    if provider == 'google':
-        try:
+        if provider == 'google':
             token = sociallogin.token
-            credentials = Credentials(
-                token=token.token,
-                refresh_token=token.token_secret,
-                token_uri='https://oauth2.googleapis.com/token',
-                client_id=token.app.client_id,
-                client_secret=token.app.secret
-            )
+            credentials = Credentials(token=token.token, refresh_token=token.token_secret, token_uri='https://oauth2.googleapis.com/token', client_id=token.app.client_id, client_secret=token.app.secret)
             service = build('calendar', 'v3', credentials=credentials)
             webhook_url = public_url + reverse('google_webhook')
             channel_uuid = str(uuid.uuid4())
             watch_request_body = {'id': channel_uuid, 'type': 'web_hook', 'address': webhook_url}
-
-            # Remove any old channels tied to this social account
-            old_channels = GoogleWebhookChannel.objects.filter(social_account_id=social_account_id)
-            for c in old_channels:
-                try:
-                    service.channels().stop(body={'id': c.channel_id, 'resourceId': c.resource_id}).execute()
-                except Exception:
-                    logger.exception("Error stopping old Google channel (continuing)")
-                c.delete()
-
+            
+            GoogleWebhookChannel.objects.filter(social_account_id=social_account_id).delete()
+            
             response = service.events().watch(calendarId='primary', body=watch_request_body).execute()
+            
             expiration_val = response.get('expiration')
             expiration_dt = None
-            if expiration_val:
-                try:
-                    # If it's a number (milliseconds), convert to datetime
-                    if str(expiration_val).isdigit():
-                        expiration_dt = datetime.fromtimestamp(int(expiration_val) / 1000, tz=timezone.utc)
-                    else:
-                        expiration_dt = parser.parse(expiration_val)
-                except Exception as e:
-                    logger.warning(f"Could not parse expiration value '{expiration_val}': {e}")
+            if expiration_val and str(expiration_val).isdigit():
+                expiration_dt = datetime.fromtimestamp(int(expiration_val) / 1000, tz=timezone.utc)
 
             GoogleWebhookChannel.objects.create(
                 social_account_id=social_account_id,
@@ -150,17 +180,10 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
             )
             logger.info(f"SUCCESS: Registered Google webhook for social_account_id={social_account_id}")
 
-        except Exception as e:
-            logger.error(f"Could not register Google webhook: {e}", exc_info=True)
+            sync_google_events(app_user, token)
 
-    elif provider in ('microsoft', 'MasterCalendarClient'):
-        try:
-            # Get token string
-            token_str = sociallogin.token.token if hasattr(sociallogin, 'token') else None
-            if not token_str:
-                logger.warning("No token available for Microsoft sociallogin; skipping subscription creation.")
-                return
-
+        elif provider in ('microsoft', 'MasterCalendarClient'):
+            token_str = sociallogin.token.token
             graph_api_endpoint = 'https://graph.microsoft.com/v1.0/subscriptions'
             headers = {'Authorization': f'Bearer {token_str}', 'Content-Type': 'application/json'}
             expiration_time = now() + timedelta(days=2)
@@ -171,30 +194,21 @@ def setup_webhooks_on_login(sender, request, sociallogin, **kwargs):
                "expirationDateTime": expiration_time.isoformat(),
                "clientState": "SecretClientState"
             }
-
-            # Remove old subscriptions for this social account (if any)
-            old_subs = OutlookWebhookSubscription.objects.filter(social_account_id=social_account_id)
-            for s in old_subs:
-                try:
-                    requests.delete(f"{graph_api_endpoint}/{s.subscription_id}", headers=headers)
-                except Exception:
-                    logger.exception("Error deleting old Outlook subscription (continuing)")
-                s.delete()
-
+            
+            OutlookWebhookSubscription.objects.filter(social_account_id=social_account_id).delete()
+            
             response = requests.post(graph_api_endpoint, headers=headers, json=subscription_payload)
-            print(f"\n\n===== MICROSOFT WEBHOOK RESPONSE =====\nSTATUS CODE: {response.status_code}\nBODY: {response.text}\n==================================\n\n")
             response.raise_for_status()
             subscription_data = response.json()
+            
             OutlookWebhookSubscription.objects.create(
                 social_account_id=social_account_id,
                 subscription_id=subscription_data['id'],
                 expiration_datetime=parser.parse(subscription_data['expirationDateTime'])
             )
             logger.info(f"SUCCESS: Registered Outlook webhook for social_account_id={social_account_id}")
-
-            # Immediately sync events for this social account
-            # We pass the app_user (the logged-in app user) so the events are stored under them
+            
             sync_outlook_events(app_user, token_str)
 
-        except Exception as e:
-            logger.error(f"Could not register Outlook webhook: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error during webhook setup or initial sync for user {app_user.username}: {e}", exc_info=True)

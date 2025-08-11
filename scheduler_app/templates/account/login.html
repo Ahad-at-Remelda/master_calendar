@@ -1,0 +1,60 @@
+{% extends "scheduler_app/base.html" %}
+{% load socialaccount %}  {# <--- THIS IS THE CRITICAL FIX #}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">Master Calendar Login</h3>
+                </div>
+                <div class="card-body">
+                    {% if form.errors %}
+                        <div class="alert alert-danger" role="alert">
+                            Your username and password didn't match. Please try again.
+                        </div>
+                    {% endif %}
+
+                    {% if next and not user.is_authenticated %}
+                        <p class="text-muted">Please login to see this page.</p>
+                    {% endif %}
+                    
+                    <!-- Standard Django Login Form -->
+                    <form method="post" action="{% url 'login' %}">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="id_username" class="form-label">Username</label>
+                            <input type="text" name="username" autofocus class="form-control form-control-lg" required id="id_username">
+                        </div>
+                        <div class="mb-3">
+                            <label for="id_password" class="form-label">Password</label>
+                            <input type="password" name="password" class="form-control form-control-lg" required id="id_password">
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">Login with Username</button>
+                        </div>
+                        <input type="hidden" name="next" value="{{ next }}">
+                    </form>
+
+                    <div class="text-center my-3">
+                        <hr>
+                        <span class="px-2 bg-white text-muted">OR</span>
+                    </div>
+
+                    <!-- Social Account Login Buttons -->
+                    <div class="d-grid gap-2">
+                        <a href="{% provider_login_url 'google' %}" class="btn btn-danger btn-lg">
+                            <i class="bi bi-google"></i> Login with Google
+                        </a>
+                        <a href="{% provider_login_url 'microsoft' %}" class="btn btn-info btn-lg text-white">
+                            <i class="bi bi-microsoft"></i> Login with Outlook
+                        </a>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
