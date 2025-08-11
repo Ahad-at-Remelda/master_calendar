@@ -7,7 +7,7 @@ from .models import Event
 class EventForm(forms.ModelForm):
     class Meta:
         model = Event
-        fields = ['title', 'description', 'date', 'start_time', 'end_time', 'location', 'is_recurring']
+        fields = ['title', 'description', 'date', 'start_time', 'end_time', 'location']
         widgets = {
             'title': forms.TextInput(attrs={'class': 'form-control'}),
             'description': forms.Textarea(attrs={'class': 'form-control'}),
@@ -17,7 +17,7 @@ class EventForm(forms.ModelForm):
             'start_time': forms.DateTimeInput(attrs={'class': 'form-control', 'type': 'datetime-local'}),
             'end_time': forms.DateTimeInput(attrs={'class': 'form-control', 'type': 'datetime-local'}),
             'location': forms.TextInput(attrs={'class': 'form-control'}),
-            'is_recurring': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            #'is_recurring': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
 
     def clean(self):

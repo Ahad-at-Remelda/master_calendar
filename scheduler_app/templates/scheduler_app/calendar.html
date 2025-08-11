@@ -21,57 +21,44 @@
         .event { font-size: 0.85em; margin-bottom: 5px; padding: 3px 6px; border-radius: 5px; word-wrap: break-word; color: white; cursor: pointer; }
         .google-event { background-color: #28a745; }
         .local-event { background-color: #17a2b8; }
-        .microsoft-event { background-color: #0078D4; } /* Renamed for clarity */
+        .microsoft-event { background-color: #0078D4; }
         .day-name { font-weight: bold; text-align: center; padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; }
     </style>
 </head>
 <body>
 
 <div class="page-wrapper">
-    <!-- ===== FINAL, CORRECTED SIDEBAR ===== -->
     <div class="sidebar bg-white p-3 border-end">
         <h4 class="mb-4">Master Calendar</h4>
-        <div class="mb-2">
-            Logged in as: <strong>{{ user.username }}</strong>
-        </div>
+        <div class="mb-2">Logged in as: <strong>{{ user.username }}</strong></div>
         <hr>
         <h5>My Connected Accounts</h5>
         
         <div class="list-group list-group-flush mb-3">
-            <!-- Google Accounts List -->
-            {% for account in connected_accounts.google %}
+            {% for account in google_accounts %}
             <div class="list-group-item d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-google text-success"></i> <small>{{ account.extra_data.email }}</small></span>
-                <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect {{ account.extra_data.email }}">
-                    <i class="bi bi-trash"></i>
-                </a>
+                <span><i class="bi bi-google text-success"></i> <small>{{ account.email }}</small></span>
+                <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect {{ account.email }}"><i class="bi bi-trash"></i></a>
             </div>
             {% endfor %}
 
-            <!-- Microsoft Accounts List -->
-            {% for account in connected_accounts.microsoft %}
+            {% for account in microsoft_accounts %}
             <div class="list-group-item d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-microsoft text-primary"></i> <small>{{ account.extra_data.mail|default:account.extra_data.userPrincipalName }}</small></span>
-                 <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect Account">
-                    <i class="bi bi-trash"></i>
-                </a>
+                <span><i class="bi bi-microsoft text-primary"></i> <small>{{ account.email }}</small></span>
+                 <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect {{ account.email }}"><i class="bi bi-trash"></i></a>
             </div>
             {% endfor %}
 
-            {% if not connected_accounts.google and not connected_accounts.microsoft %}
+            {% if not google_accounts and not microsoft_accounts %}
                 <p class="text-muted small p-2">No external accounts connected.</p>
             {% endif %}
         </div>
-
         <hr>
+
         <h5>Connect New Account</h5>
         <div class="d-grid gap-2">
-            <a href="{% provider_login_url 'google' process='connect' %}" class="btn btn-sm btn-outline-success">
-                <i class="bi bi-plus"></i> Connect Google Account
-            </a>
-            <a href="{% provider_login_url 'microsoft' process='connect' %}" class="btn btn-sm btn-outline-primary">
-                <i class="bi bi-plus"></i> Connect Outlook Account
-            </a>
+            <a href="{% provider_login_url 'google' process='connect' %}" class="btn btn-sm btn-outline-success"><i class="bi bi-plus"></i> Connect Google Account</a>
+            <a href="{% provider_login_url 'microsoft' process='connect' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus"></i> Connect Outlook Account</a>
         </div>
         <hr>
 
@@ -83,20 +70,16 @@
             <button type="submit" class="btn btn-secondary">Logout</button>
         </form>
     </div>
-    <!-- ======================================= -->
 
-    <!-- ===== MAIN CALENDAR CONTENT ===== -->
     <div class="main-content bg-light p-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <a class="btn btn-outline-primary" href="{% url 'calendar' year=prev_year month=prev_month %}"><i class="bi bi-arrow-left"></i> Previous</a>
             <h1 class="mb-0 h3">{{ month_name }} {{ year }}</h1>
             <a class="btn btn-outline-primary" href="{% url 'calendar' year=next_year month=next_month %}">Next <i class="bi bi-arrow-right"></i></a>
         </div>
-
         <div class="calendar-grid mb-3">
             <div class="day-name">Sun</div><div class="day-name">Mon</div><div class="day-name">Tue</div><div class="day-name">Wed</div><div class="day-name">Thu</div><div class="day-name">Fri</div><div class="day-name">Sat</div>
         </div>
-
         <div class="calendar-grid">
             {% for data in days_data %}
                 {% if data.is_placeholder %}
@@ -106,8 +89,7 @@
                         <div class="calendar-day-header">{{ data.day }}</div>
                         <div class="event-list">
                             {% for event in data.events %}
-                                <div class="event {{ event.source }}-event"
-                                     data-event-id="{{ event.id }}">
+                                <div class="event {{ event.source }}-event" data-event-id="{{ event.id }}">
                                     <strong>{{ event.title }}</strong>
                                     {% if event.start_time and event.start_time != 'All Day' %}
                                         <br><small><i class="bi bi-clock"></i> {{ event.start_time }}</small>
@@ -122,116 +104,102 @@
     </div>
 </div>
 
-    <!-- BOOTSTRAP MODAL FOR EVENT DETAILS -->
-    <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modal-title">Event Details</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p><strong>Description:</strong> <span id="modal-description"></span></p>
-                    <p><strong>Starts:</strong> <span id="modal-start-time"></span></p>
-                    <p><strong>Ends:</strong> <span id="modal-end-time"></span></p>
-                    <p><strong>Location:</strong> <span id="modal-location"></span></p>
-                    <p><strong>Meeting Link:</strong> <a href="#" id="modal-meeting-link" target="_blank">Join Meeting</a></p>
-                    <p><small><strong>Source:</strong> <span id="modal-source"></span></small></p>
-                </div>
+<!-- BOOTSTRAP MODAL FOR EVENT DETAILS (Your modal code is good) -->
+<div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modal-title">Event Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Description:</strong> <span id="modal-description"></span></p>
+                <p><strong>Starts:</strong> <span id="modal-start-time"></span></p>
+                <p><strong>Ends:</strong> <span id="modal-end-time"></span></p>
+                <p><strong>Location:</strong> <span id="modal-location"></span></p>
+                <p><strong>Meeting Link:</strong> <a href="#" id="modal-meeting-link" target="_blank">Join Meeting</a></p>
+                <p><small><strong>Source:</strong> <span id="modal-source"></span></small></p>
             </div>
         </div>
     </div>
+</div>
 
 
-    <!-- ===== COMPLETE JAVASCRIPT SECTION ===== -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            
-            // --- DYNAMIC FILTERING LOGIC ---
-            const filterCheckboxes = document.querySelectorAll('.sidebar .form-check-input');
-            function updateVisibleEvents() {
-                const visibleSources = Array.from(filterCheckboxes)
-                                           .filter(cb => cb.checked)
-                                           .map(cb => cb.value);
-                document.querySelectorAll('.event').forEach(eventEl => {
-                    const eventSource = eventEl.dataset.source;
-                    // Handle both 'outlook' and 'microsoft' as the same for filtering
-                    if (eventSource === 'microsoft' && visibleSources.includes('outlook')) {
-                        eventEl.style.display = 'block';
-                    } else if (visibleSources.includes(eventSource)) {
-                        eventEl.style.display = 'block';
-                    } else {
-                        eventEl.style.display = 'none';
-                    }
-                });
-            }
-            filterCheckboxes.forEach(checkbox => {
-                checkbox.addEventListener('change', updateVisibleEvents);
-                // Also map the 'outlook' checkbox to the 'microsoft' source
-                if(checkbox.value === 'outlook') {
-                    const microsoftCheckbox = document.querySelector('input[value="microsoft"]');
-                    if(microsoftCheckbox) {
-                        checkbox.addEventListener('change', () => microsoftCheckbox.checked = checkbox.checked);
-                    }
-                }
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const calendarContainer = document.querySelector('.main-content');
+    
+    // --- MODAL LOGIC (This is already correct) ---
+    function initializeModalEventListeners() {
+        const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
+        document.querySelectorAll('.event').forEach(eventEl => {
+            eventEl.addEventListener('click', function () {
+                const eventId = this.dataset.eventId;
+                if (!eventId) return;
+                fetch(`/api/event/${eventId}/`)
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('modal-title').textContent = data.title;
+                        document.getElementById('modal-description').textContent = data.description || 'No description.';
+                        document.getElementById('modal-start-time').textContent = data.start_time;
+                        document.getElementById('modal-end-time').textContent = data.end_time || 'N/A';
+                        document.getElementById('modal-location').textContent = data.location || 'N/A';
+                        const meetingLinkEl = document.getElementById('modal-meeting-link');
+                        if (data.meeting_link) {
+                            meetingLinkEl.href = data.meeting_link;
+                            meetingLinkEl.parentElement.style.display = 'block';
+                        } else {
+                            meetingLinkEl.parentElement.style.display = 'none';
+                        }
+                        document.getElementById('modal-source').textContent = `${data.source} (${data.account_email || 'Local'})`;
+                        eventDetailModal.show();
+                    });
             });
-            updateVisibleEvents(); // Initial run
-
-            // --- MODAL LOGIC ---
-            const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
-            document.querySelectorAll('.event').forEach(eventEl => {
-                eventEl.addEventListener('click', function () {
-                    const eventId = this.dataset.eventId;
-                    if (!eventId) return;
-                    fetch(`/api/event/${eventId}/`)
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error('Network response was not ok');
-                            }
-                            return response.json();
-                        })
-                        .then(data => {
-                            document.getElementById('modal-title').textContent = data.title;
-                            document.getElementById('modal-description').textContent = data.description || 'No description provided.';
-                            document.getElementById('modal-start-time').textContent = data.start_time;
-                            document.getElementById('modal-end-time').textContent = data.end_time || 'N/A';
-                            document.getElementById('modal-location').textContent = data.location || 'N/A';
-                            
-                            const meetingLink = document.getElementById('modal-meeting-link');
-                            if (data.meeting_link) {
-                                meetingLink.href = data.meeting_link;
-                                meetingLink.parentElement.style.display = 'block';
-                            } else {
-                                meetingLink.parentElement.style.display = 'none';
-                            }
-                            
-                            document.getElementById('modal-source').textContent = data.source;
-                            eventDetailModal.show();
-                        })
-                        .catch(error => {
-                            console.error('Error fetching event details:', error);
-                        });
-                });
-            });
-
-            // --- WEBSOCKET LOGIC ---
-            {% if user.is_authenticated %}
-                const userSocket = new WebSocket(
-                    (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/"
-                );
-                userSocket.onmessage = function (e) {
-                    const data = JSON.parse(e.data);
-                    if (data.update === "calendar_changed") {
-                        console.log("Real-time update received! Reloading...");
-                        location.reload();
-                    }
-                };
-                userSocket.onclose = function (e) { console.error("WebSocket closed unexpectedly."); };
-            {% endif %}
         });
-    </script>
-    <!-- ======================================== -->
+    }
+    
+    // Initialize modals for the events that are loaded on the page first
+    initializeModalEventListeners();
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    // --- WEBSOCKET LOGIC (This is the critical fix) ---
+    {% if user.is_authenticated %}
+        const userSocket = new WebSocket(
+            (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/"
+        );
+
+        userSocket.onmessage = function (e) {
+            const data = JSON.parse(e.data);
+            if (data.update === "calendar_changed") {
+                console.log("Real-time update received! Fetching new calendar content...");
+                
+                // Instead of a full page reload, we fetch the current calendar URL
+                fetch(window.location.href)
+                    .then(response => response.text())
+                    .then(html => {
+                        // We use a little trick to parse the new HTML
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        
+                        // We find the calendar content in the new HTML
+                        const newCalendarContent = doc.querySelector('.main-content').innerHTML;
+                        
+                        // And we replace the content on our current page with the new content
+                        calendarContainer.innerHTML = newCalendarContent;
+                        
+                        // We must re-initialize the click listeners for the new events
+                        initializeModalEventListeners();
+                        console.log("Calendar updated in place.");
+                    });
+            }
+        };
+
+        userSocket.onclose = function (e) { 
+            console.error("WebSocket closed unexpectedly. Please refresh the page for real-time updates."); 
+        };
+    {% endif %}
+});
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

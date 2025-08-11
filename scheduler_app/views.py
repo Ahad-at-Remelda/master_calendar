@@ -40,15 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 
-@login_required
-def redirect_after_login(request):
-    """
-    This is the single, final destination after any successful login or social connect.
-    It simply redirects the user to the current month's calendar.
-    """
-    today = timezone.now()
-    logger.info(f"Redirecting user {request.user.username} to current month: {today.month}/{today.year}")
-    return redirect('calendar', year=today.year, month=today.month)
+# @login_required
+# def redirect_after_login(request):
+#     """
+#     This is the single, final destination after any successful login or social connect.
+#     It simply redirects the user to the current month's calendar.
+#     """
+#     today = timezone.now()
+#     logger.info(f"Redirecting user {request.user.username} to current month: {today.month}/{today.year}")
+#     return redirect('calendar', year=today.year, month=today.month)
 
 def home(request):
     today = date.today()
@@ -57,6 +57,9 @@ def home(request):
 
 @login_required
 def add_event(request):
+    """
+    This is the corrected version of the add_event view.
+    """
     if request.method == 'POST':
         form = EventForm(request.POST)
         if form.is_valid():
@@ -67,112 +70,139 @@ def add_event(request):
             new_event_date = form.cleaned_data['date']
             return redirect('calendar', year=new_event_date.year, month=new_event_date.month)
     else:
-        form = EventForm(initial={'date': date.today()})
-    today = date.today()
-    context = {'form': form, 'year': today.year, 'month': today.month}
+        form = EventForm(initial={'date': timezone.now().date()})
+    
+    # THIS IS THE FIX:
+    # We get the current date to pass to the template, so it can build
+    # the "Back to Calendar" link correctly.
+    today = timezone.now()
+    context = {
+        'form': form,
+        'year': today.year,
+        'month': today.month
+    }
     return render(request, 'scheduler_app/add_event.html', context)
-
-@login_required
-def disconnect_social_account(request, account_id):
-    """
-    Disconnects a specific social account by its primary key ID.
-    """
-    try:
-        # Find the specific SocialAccount ensuring it belongs to the logged-in user for security.
-        social_account = get_object_or_404(SocialAccount, id=account_id, user=request.user)
-        provider_name = social_account.provider.capitalize()
-
-        # Delete associated events first
-        Event.objects.filter(user=request.user, source=social_account.provider, event_id__isnull=False).delete()
-
-        # Remove related webhook entries
-        if social_account.provider == 'google':
-            GoogleWebhookChannel.objects.filter(social_account_id=social_account.id).delete()
-        elif social_account.provider == 'microsoft':
-            OutlookWebhookSubscription.objects.filter(social_account_id=social_account.id).delete()
-
-        # Finally, delete the social account connection itself
-        social_account.delete()
-        
-        messages.success(request, f"Successfully disconnected your {provider_name} account.")
-
-    except SocialAccount.DoesNotExist:
-        messages.error(request, "The account you tried to disconnect does not exist.")
-    except Exception as e:
-        messages.error(request, f"An error occurred while disconnecting the account: {e}")
-
-    # Redirect back to the page the user was on
-    return redirect(request.META.get('HTTP_REFERER', '/'))
 
 
 @login_required
 def calendar_view(request, year, month):
     """
-    Final, definitive version. This correctly handles the allauth "same email"
-    user account merging and displays all events for the single, unified user.
+    This is the final, correct view for displaying the calendar.
+    It contains the definitive fix for the event grouping logic.
     """
-    year = int(year)
-    month = int(month)
+    print('inside the calendar_view')
+    year, month = int(year), int(month)
+    
+    # Date calculations for navigation
     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
-    first_weekday, num_days = cal.monthrange(year, month)
+    
+    # Get all events for the logged-in user for the given month and year
+    print(request.user)
+    all_user_events = Event.objects.filter(
+        user=request.user,
+        date__year=year,
+        date__month=month
+    ).order_by('start_time')
+    print(all_user_events)
+    # Prepare events, grouping them by day
+    num_days_in_month = cal.monthrange(year, month)[1]
+    events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
+    
+    for event in all_user_events:
+        # THIS IS THE CRITICAL FIX:
+        # We ensure the day of the event exists as a key in our dictionary
+        # before we try to append the event data to its list.
+        day_of_event = event.date.day
+        if day_of_event in events_by_day:
+            events_by_day[day_of_event].append({
+                'id': event.id,
+                'title': event.title,
+                'source': event.source,
+                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day'
+            })
+
+    # Prepare the calendar grid data structure for the template
+    first_weekday = cal.monthrange(year, month)[0]
     start_day_of_week = (first_weekday + 1) % 7
-    events_by_day = {day: [] for day in range(1, num_days + 1)}
-
-    if request.user.is_authenticated:
-        # --- THIS IS THE CRITICAL FIX ---
-        # We no longer need to check for specific providers. If the user is logged in,
-        # all their social accounts (Google, Microsoft, etc.) are linked to the
-        # single `request.user` object. We simply fetch all events that belong to this user.
-        all_user_events = Event.objects.filter(
-            user=request.user,
-            date__year=year,
-            date__month=month
-        ).order_by('start_time')
-        # --------------------------------
-
-        for event in all_user_events:
-            start_time_str = event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day'
-            
-            # Ensure the day from the event date exists in our dictionary
-            if event.date.day in events_by_day:
-                events_by_day[event.date.day].append({
-                    'id': event.id,
-                    'title': event.title,
-                    'source': event.source,
-                    'start_time': start_time_str
-                })
-    days_data = []
-    for _ in range(start_day_of_week):
-        days_data.append({'is_placeholder': True})
-    for day in range(1, num_days + 1):
+    days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
+    for day in range(1, num_days_in_month + 1):
         days_data.append({
             'day': day,
-            'events': events_by_day.get(day, []),
+            'events': events_by_day.get(day, []), # Use .get() for safety
             'is_placeholder': False
         })
 
-    # Get the list of connected accounts to pass to the template for the UI
-    all_accounts = SocialAccount.objects.filter(user=request.user)
-    connected_accounts = {
-        'google': all_accounts.filter(provider='google'),
-        'microsoft': all_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient'])
-    }
-    
+    # Prepare a clean list of connected social accounts for the sidebar
+    all_social_accounts = SocialAccount.objects.filter(user=request.user)
+    google_accounts_list = [
+        {'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')}
+        for acc in all_social_accounts.filter(provider='google')
+    ]
+    microsoft_accounts_list = [
+        {'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)')}
+        for acc in all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient'])
+    ]
+        
     context = {
-            'year': year,
-            'month': month,
-            # THIS IS THE FIX: We add the month's name to the context.
-            'month_name': cal.month_name[month],
-            'days_data': days_data,
-            'prev_year': prev_year,
-            'prev_month': prev_month,
-            'next_year': next_year,
-            'next_month': next_month,
-            'connected_accounts': connected_accounts,
-        }
+        'year': year,
+        'month': month,
+        'month_name': cal.month_name[month],
+        'days_data': days_data,
+        'prev_year': prev_year,
+        'prev_month': prev_month,
+        'next_year': next_year,
+        'next_month': next_month,
+        'google_accounts': google_accounts_list,
+        'microsoft_accounts': microsoft_accounts_list,
+    }
     return render(request, 'scheduler_app/calendar.html', context)
 
+@login_required
+def event_detail_api(request, event_id):
+    event = get_object_or_404(Event, id=event_id, user=request.user)
+    account_email = None
+    if event.social_account:
+        account_email = event.social_account.extra_data.get('email') or event.social_account.extra_data.get('mail')
+    data = {
+        'id': event.id,
+        'title': event.title,
+        'description': event.description,
+        'date': event.date.strftime('%Y-%m-%d'),
+        'start_time': event.start_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.start_time else "All-day",
+        'end_time': event.end_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.end_time else "",
+        'location': event.location,
+        'meeting_link': event.meeting_link,
+        'source': event.source,
+        'account_email': account_email,
+    }
+    return JsonResponse(data)
+
+@login_required
+def disconnect_social_account(request, account_id):
+    try:
+        social_account = get_object_or_404(SocialAccount, id=account_id, user=request.user)
+        provider_name = social_account.get_provider().name
+        Event.objects.filter(social_account=social_account).delete()
+        social_account.delete()
+        messages.success(request, f"Successfully disconnected your {provider_name} account.")
+    except Exception as e:
+        messages.error(request, f"An error occurred: {e}")
+    today = timezone.now()
+    return redirect('calendar', year=today.year, month=today.month)
+
+
+
+
+@login_required
+def redirect_after_login(request):
+    """
+    This is the single, final destination after any successful login or social connect.
+    It simply redirects the user to the current month's calendar.
+    """
+    today = timezone.now()
+    logger.info(f"Redirecting user {request.user.username} to current month: {today.month}/{today.year}")
+    return redirect('calendar', year=today.year, month=today.month)
 
 
 # --- THIS IS THE FINAL, CORRECTED GOOGLE WEBHOOK RECEIVER ---
@@ -345,35 +375,7 @@ def outlook_webhook_receiver(request):
 
 
 
-@login_required
-def event_detail_api(request, event_id):
-    """
-    API endpoint that returns the details of a single event as JSON.
-    This is called by the JavaScript when an event is clicked on the calendar.
-    """
-    # Find the event by its unique database ID, ensuring it belongs to the
-    # currently logged-in user for security. If not found, it will raise a 404 error.
-    event = get_object_or_404(Event, id=event_id, user=request.user)
 
-    # Format the start and end times into a more human-readable string.
-    # Handle the case where an event might be "all-day" and not have a specific time.
-    start_time = event.start_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.start_time else "All-day"
-    end_time = event.end_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.end_time else ""
-
-    # Prepare all the event's data in a dictionary to be sent as JSON.
-    data = {
-        'id': event.id,
-        'title': event.title,
-        'description': event.description,
-        'date': event.date.strftime('%Y-%m-%d'),
-        'start_time': start_time,
-        'end_time': end_time,
-        'location': event.location,
-        'meeting_link': event.meeting_link,
-        'source': event.source or 'local', # Ensure the source is not None for the template
-    }
-    
-    return JsonResponse(data)
 
 
 
@@ -396,7 +398,7 @@ def select_calendars_view(request, provider):
             calendar_list = service.calendarList().list().execute()
             calendars = [{'id': cal['id'], 'name': cal['summary']} for cal in calendar_list.get('items', [])]
         
-        elif provider == 'microsoft':
+        elif provider == 'microsoft' or 'MasterCalendarClient':
             headers = {'Authorization': f'Bearer {token.token}'}
             response = requests.get('https://graph.microsoft.com/v1.0/me/calendars', headers=headers)
             response.raise_for_status()
