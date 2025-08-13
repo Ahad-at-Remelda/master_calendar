@@ -4,8 +4,10 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 import calendar as cal
-import logging
+import logging,os
 import base64
+from django.core.mail import EmailMessage
+from ics import Calendar, Event as ICSEvent
 from datetime import timedelta,time, datetime
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -299,9 +301,10 @@ def booking_view(request, sharing_uuid):
     return render(request, 'scheduler_app/booking_page.html', context)
 
 
+
 def confirm_booking_view(request, sharing_uuid, datetime_iso):
     """
-    Handles the final confirmation, creates the event, and sends a confirmation email.
+    Handles confirmation, creates the event, and sends a calendar invitation email.
     """
     profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
     owner = profile.user
@@ -312,47 +315,66 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
 
     if request.method == 'POST':
         booker_name = request.POST.get('name', 'Guest')
-        booker_email = request.POST.get('email', 'no-email@example.com')
+        booker_email = request.POST.get('email')
         meeting_title = request.POST.get('title', f"Meeting with {booker_name}")
+        guest_list_str = request.POST.get('guests', '')
         
-        # 1. Create the new local event for the calendar OWNER
+        # Ensure we have a valid booker email to proceed
+        if not booker_email:
+            messages.error(request, "A valid email address is required to book a meeting.")
+            # Re-render the form with an error
+            context = {'owner': owner, 'start_time': start_time, 'end_time': end_time}
+            return render(request, 'scheduler_app/confirm_booking_form.html', context)
+
+        guest_emails = [email.strip() for email in guest_list_str.split(',') if email.strip()]
+
+        # 1. Create the local event for the owner's calendar
         Event.objects.create(
-            user=owner,
-            source='local',
-            title=meeting_title,
-            description=f"Booked via public link by: {booker_name} ({booker_email})",
-            date=start_time.date(),
-            start_time=start_time,
-            end_time=end_time
+            user=owner, source='local', title=meeting_title,
+            description=f"Booked by: {booker_name} ({booker_email}). Guests: {', '.join(guest_emails)}",
+            date=start_time.date(), start_time=start_time, end_time=end_time
         )
         
-        # --- THIS IS THE NEW EMAIL LOGIC ---
+        # 2. Create the .ics calendar invitation file
+        cal_invite = Calendar()
+        ics_event = ICSEvent()
+        ics_event.name = meeting_title
+        ics_event.begin = start_time
+        ics_event.end = end_time
+        ics_event.organizer = owner.email or settings.DEFAULT_FROM_EMAIL
+        
+        # Add the booker and all guests as attendees
+        all_attendees = [booker_email] + guest_emails
+        for attendee_email in all_attendees:
+            ics_event.add_attendee(attendee_email)
+            
+        cal_invite.events.add(ics_event)
+        
+        # 3. Create and send the email with the .ics attachment
         try:
-            subject = f"Confirmed: {meeting_title} with {owner.username}"
-            
-            # Format the time for the email body
-            email_start_time = start_time.strftime("%A, %B %d, %Y at %I:%M %p %Z")
-            
-            message = (
-                f"Hi {booker_name},\n\n"
-                f"Your meeting has been scheduled with {owner.username}.\n\n"
+            subject = f"Invitation: {meeting_title} with {owner.username}"
+            body = (
+                f"You have been invited to a meeting by {owner.username}.\n\n"
                 f"Event: {meeting_title}\n"
-                f"Time: {email_start_time}\n\n"
-                f"This event has been added to {owner.username}'s calendar."
+                f"Time: {start_time.strftime('%A, %B %d, %Y at %I:%M %p %Z')}"
             )
             
-            from_email = settings.DEFAULT_FROM_EMAIL
-            recipient_list = [booker_email]
+            email = EmailMessage(
+                subject,
+                body,
+                from_email=settings.DEFAULT_FROM_EMAIL, # Sent from the Master Calendar email
+                to=all_attendees, # Sent to the booker and all guests
+            )
             
-            send_mail(subject, message, from_email, recipient_list)
-            
-            logger.info(f"Confirmation email sent to {booker_email} for meeting with {owner.username}")
+            # Attach the calendar file with the correct MIME type
+            email.attach('invite.ics', str(cal_invite), 'text/calendar')
+            email.send()
+            logger.info(f"Calendar invitation sent successfully to {all_attendees}")
             
         except Exception as e:
-            logger.error(f"Failed to send confirmation email to {booker_email}: {e}")
-        # --- END OF EMAIL LOGIC ---
-        
-        # 2. Redirect to the success page
+            logger.error(f"Failed to send calendar invitation: {e}")
+            # Even if the email fails, we should still show a success page
+            
         return render(request, 'scheduler_app/booking_successful.html', {'owner': owner, 'start_time': start_time})
 
     context = {

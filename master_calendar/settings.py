@@ -7,7 +7,7 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL= 'https://29eee4c780a5.ngrok-free.app'
+NGROK_URL= 'https://5dd3d455c498.ngrok-free.app'
 
 # --- THIS IS THE CRITICAL FIX ---
 # Hostnames must NOT include 'http://' or 'https://'.
@@ -15,13 +15,19 @@ NGROK_URL= 'https://29eee4c780a5.ngrok-free.app'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '29eee4c780a5.ngrok-free.app',
+    '5dd3d455c498.ngrok-free.app',
 ]
 # --------------------------------
 CSRF_TRUSTED_ORIGINS = [
-    'https://29eee4c780a5.ngrok-free.app',
+    'https://5dd3d455c498.ngrok-free.app',
     'https://*.ngrok-free.app',
 ]
+
+STATIC_URL = '/static/'
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',  # for custom static files in development
+]
+STATIC_ROOT = BASE_DIR / 'staticfiles'  # where collectstatic will put files
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -112,12 +118,29 @@ SITE_ID = 1
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'SCOPE': [
-            'profile', 'email', 'https://www.googleapis.com/auth/calendar.readonly', 'https://www.googleapis.com/auth/calendar.events',
+            'profile',
+            'email',
+            'https://www.googleapis.com/auth/calendar.readonly',
+            'https://www.googleapis.com/auth/calendar.events',
         ],
-        'AUTH_PARAMS': {'access_type': 'offline'}
+        'AUTH_PARAMS': {
+            'access_type': 'offline',
+            # THIS IS THE CRITICAL FIX:
+            # This forces Google to show the consent screen every time,
+            # which guarantees that we will always receive a refresh_token.
+            'prompt': 'consent',
+        }
     },
     'microsoft': {
-        'SCOPE': ['User.Read', 'Calendars.ReadWrite', 'offline_access'],
+        'SCOPE': [
+            'User.Read',
+            'Calendars.ReadWrite',
+            'offline_access',
+        ],
+        # It's good practice to add this for Microsoft as well.
+        'AUTH_PARAMS': {
+            'prompt': 'consent',
+        }
     }
 }
 
@@ -162,5 +185,15 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
 }
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-DEFAULT_FROM_EMAIL = 'Master Calendar <noreply@mastercalendar.com>'
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# DEFAULT_FROM_EMAIL = 'Master Calendar <noreply@mastercalendar.com>'
+
+
+# --- PRODUCTION EMAIL CONFIGURATION ---
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtppro.zoho.com'  # e.g., 'smtp.gmail.com' or your company's server
+EMAIL_PORT = 587  # This is the standard port for TLS
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER='notifications@remelda.com'
+EMAIL_HOST_PASSWORD = 'c4gr?ewP1' # IMPORTANT: Use environment variables for this in production
+DEFAULT_FROM_EMAIL = f"Master Calendar <{EMAIL_HOST_USER}>"

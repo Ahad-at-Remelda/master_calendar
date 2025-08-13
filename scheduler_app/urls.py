@@ -31,4 +31,5 @@ urlpatterns = [
 
     # This is the confirmation page shown to the person after they select a time slot.
     path('book/<uuid:sharing_uuid>/confirm/<str:datetime_iso>/', views.confirm_booking_view, name='confirm_booking'),
+    
 ]

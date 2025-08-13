@@ -1,0 +1,100 @@
+{% extends "scheduler_app/base_public.html" %}
+
+{% block title %}Select a Date & Time{% endblock %}
+
+{% block content %}
+<div class="container my-4 my-md-5" style="max-width: 960px;">
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="row g-0">
+                <!-- Left Panel: Information -->
+                <div class="col-lg-4 border-end p-4">
+                    <p class="text-muted">{{ owner.username }}</p>
+                    <h2 class="h4">Book a Meeting</h2>
+                    <hr>
+                    <p><i class="bi bi-clock me-2"></i> 30 min Meeting</p>
+                    <p><i class="bi bi-globe me-2"></i> Timezone: UTC</p>
+                </div>
+
+                <!-- Right Panel: Date & Time Selection -->
+                <div class="col-lg-8 d-flex">
+                    <!-- Calendar Date Picker (Left side of right panel) -->
+                    <div class="p-4" style="flex: 1.2;">
+                        <h3 class="h5 mb-3 text-center">Select a Date</h3>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <button class="btn btn-sm btn-link" disabled><i class="bi bi-chevron-left"></i></button>
+                            <strong>{{ availability.keys.0|date:"F Y" }}</strong>
+                            <button class="btn btn-sm btn-link" disabled><i class="bi bi-chevron-right"></i></button>
+                        </div>
+                        <div class="d-grid gap-1" style="grid-template-columns: repeat(7, 1fr);">
+                            <!-- THIS IS THE FIX: We are now hardcoding the day names -->
+                            <div class="text-center text-muted small fw-bold">MON</div>
+                            <div class="text-center text-muted small fw-bold">TUE</div>
+                            <div class="text-center text-muted small fw-bold">WED</div>
+                            <div class="text-center text-muted small fw-bold">THU</div>
+                            <div class="text-center text-muted small fw-bold">FRI</div>
+                            <div class="text-center text-muted small fw-bold">SAT</div>
+                            <div class="text-center text-muted small fw-bold">SUN</div>
+                            
+                            <!-- This logic for displaying date buttons is correct -->
+                            {% for date, slots in availability.items %}
+                                <button class="btn date-selector {% if slots %}btn-primary{% else %}btn-outline-secondary disabled{% endif %}" data-date-iso="{{ date|date:'Y-m-d' }}">
+                                    {{ date|date:"j" }}
+                                </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Time Slot Picker (Right side of right panel) -->
+                    <div class="p-4 border-start" id="time-slot-container" style="flex: 1; overflow-y: auto; max-height: 400px;">
+                        <h4 id="time-slot-header" class="h6 fw-bold">Select a Time</h4>
+                        {% for date, slots in availability.items %}
+                            <div class="time-slots-for-date d-none" id="slots-for-{{ date|date:'Y-m-d' }}">
+                                {% for slot in slots %}
+                                    <a href="{% url 'confirm_booking' sharing_uuid=sharing_uuid datetime_iso=slot.isoformat %}" class="btn btn-outline-primary w-100 mb-2">
+                                        {{ slot|date:"h:i A" }}
+                                    </a>
+                                {% endfor %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dateSelectors = document.querySelectorAll('.date-selector');
+    const timeSlotContainer = document.getElementById('time-slot-container');
+    const timeSlotHeader = document.getElementById('time-slot-header');
+
+    dateSelectors.forEach(button => {
+        button.addEventListener('click', function() {
+            const selectedDateISO = this.dataset.dateIso;
+            // Add 'T00:00:00Z' to parse as UTC, preventing timezone issues
+            const selectedDate = new Date(selectedDateISO + 'T00:00:00Z'); 
+            
+            timeSlotHeader.textContent = selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
+            document.querySelectorAll('.time-slots-for-date').forEach(div => {
+                div.classList.add('d-none');
+            });
+            
+            const targetSlotList = document.getElementById(`slots-for-${selectedDateISO}`);
+            if (targetSlotList) {
+                targetSlotList.classList.remove('d-none');
+            }
+        });
+    });
+
+    // Automatically click the first available date when the page loads
+    const firstAvailableDate = document.querySelector('.date-selector.btn-primary');
+    if (firstAvailableDate) {
+        firstAvailableDate.click();
+    }
+});
+</script>
+
+{% endblock %}
