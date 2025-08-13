@@ -10,17 +10,15 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
-        .page-wrapper { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+        .page-wrapper { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
         .sidebar { flex-shrink: 0; overflow-y: auto; }
         .main-content { flex-grow: 1; overflow-y: auto; }
         .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
-        .calendar-day { min-height: 120px; border: 1px solid #ddd; padding: 10px; position: relative; background-color: #fff; display: flex; flex-direction: column; }
-        .placeholder-day { min-height: 120px; background-color: #f8f9fa; }
-        .calendar-day-header { font-weight: bold; font-size: 1.1em; text-align: right; }
-        .event-list { flex-grow: 1; overflow-y: auto; margin-top: 5px; }
-        .event { font-size: 0.85em; margin-bottom: 5px; padding: 3px 6px; border-radius: 5px; word-wrap: break-word; color: white; cursor: pointer; }
+        .calendar-day { min-height: 120px; border: 1px solid #ddd; padding: 8px; position: relative; background-color: #fff; display: flex; flex-direction: column; }
+        .event { display: flex; align-items: center; font-size: 0.85em; margin-bottom: 5px; padding: 3px 6px; border-radius: 5px; color: white; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .event-icon { width: 16px; height: 16px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; background-color: rgba(255,255,255,0.3); }
         .google-event { background-color: #28a745; }
-        .local-event { background-color: #b81747ff; }
+        .local-event { background-color: #0dcaf0; }
         .microsoft-event { background-color: #0078D4; }
         .day-name { font-weight: bold; text-align: center; padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; }
     </style>
@@ -32,26 +30,31 @@
         <h4 class="mb-4">Master Calendar</h4>
         <div class="mb-2">Logged in as: <strong>{{ user.username }}</strong></div>
         <hr>
-        <h5>My Connected Accounts</h5>
         
+        <h5>My Calendars & Filters</h5>
         <div class="list-group list-group-flush mb-3">
+            <label class="list-group-item d-flex gap-3 align-items-center">
+                <input class="form-check-input flex-shrink-0 calendar-filter" type="checkbox" data-filter-type="source" data-filter-value="local" checked>
+                <span><i class="bi bi-calendar3 text-info"></i> Local Events</span>
+            </label>
             {% for account in google_accounts %}
             <div class="list-group-item d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-google text-success"></i> <small>{{ account.email }}</small></span>
-                <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect {{ account.email }}"><i class="bi bi-trash"></i></a>
+                <label class="d-flex gap-3 align-items-center flex-grow-1" style="cursor: pointer;">
+                    <input class="form-check-input flex-shrink-0 calendar-filter" type="checkbox" data-filter-type="account" data-filter-value="{{ account.id }}" checked>
+                    <span><i class="bi bi-google text-success"></i> <small>{{ account.email }}</small></span>
+                </label>
+                <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger ms-2"><i class="bi bi-trash"></i></a>
             </div>
             {% endfor %}
-
             {% for account in microsoft_accounts %}
             <div class="list-group-item d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-microsoft text-primary"></i> <small>{{ account.email }}</small></span>
-                 <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger" title="Disconnect {{ account.email }}"><i class="bi bi-trash"></i></a>
+                <label class="d-flex gap-3 align-items-center flex-grow-1" style="cursor: pointer;">
+                    <input class="form-check-input flex-shrink-0 calendar-filter" type="checkbox" data-filter-type="account" data-filter-value="{{ account.id }}" checked>
+                    <span><i class="bi bi-microsoft text-primary"></i> <small>{{ account.email }}</small></span>
+                </label>
+                 <a href="{% url 'disconnect_social_account' account.id %}" class="btn btn-sm btn-outline-danger ms-2"><i class="bi bi-trash"></i></a>
             </div>
             {% endfor %}
-
-            {% if not google_accounts and not microsoft_accounts %}
-                <p class="text-muted small p-2">No external accounts connected.</p>
-            {% endif %}
         </div>
         <hr>
 
@@ -60,6 +63,24 @@
             <a href="{% provider_login_url 'google' process='connect' %}" class="btn btn-sm btn-outline-success"><i class="bi bi-plus"></i> Connect Google Account</a>
             <a href="{% provider_login_url 'microsoft' process='connect' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus"></i> Connect Outlook Account</a>
         </div>
+        <hr>
+
+        <!-- =============================================== -->
+        <!-- == THIS IS THE NEW, SIMPLIFIED SHARING SECTION == -->
+        <!-- =============================================== -->
+        <h5>Share My Booking Link</h5>
+        {% if sharing_url %}
+            <div class="input-group">
+                <input type="text" id="sharing-url-input" class="form-control form-control-sm" value="{{ sharing_url }}" readonly>
+                <button class="btn btn-outline-secondary" type="button" id="copy-url-btn" title="Copy to clipboard">
+                    <i class="bi bi-clipboard"></i>
+                </button>
+            </div>
+        {% else %}
+             <p class="text-muted small">An error occurred generating your sharing link.</p>
+        {% endif %}
+        <!-- =============================================== -->
+        
         <hr>
 
         <div class="d-grid">
@@ -82,29 +103,35 @@
         </div>
         <div class="calendar-grid">
             {% for data in days_data %}
-                {% if data.is_placeholder %}
-                    <div class="placeholder-day"></div>
-                {% else %}
-                    <div class="calendar-day">
+                <div class="{% if data.is_placeholder %}placeholder-day{% else %}calendar-day{% endif %}">
+                    {% if not data.is_placeholder %}
                         <div class="calendar-day-header">{{ data.day }}</div>
                         <div class="event-list">
                             {% for event in data.events %}
-                                <div class="event {{ event.source }}-event" data-event-id="{{ event.id }}">
-                                    <strong>{{ event.title }}</strong>
-                                    {% if event.start_time and event.start_time != 'All Day' %}
-                                        <br><small><i class="bi bi-clock"></i> {{ event.start_time }}</small>
+                                <div class="event {{ event.source }}-event" 
+                                     data-event-id="{{ event.id }}"
+                                     data-event-source="{{ event.source }}"
+                                     data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                    {% if event.profile_pic_url %}
+                                        <img src="{{ event.profile_pic_url }}" class="event-icon" alt="Avatar">
+                                    {% elif event.source == 'microsoft' %}
+                                        {% for acc in microsoft_accounts %}{% if acc.id == event.social_account_id and acc.avatar_url %}<img src="{{ acc.avatar_url }}" class="event-icon" alt="Avatar">{% endif %}{% endfor %}
+                                    {% elif event.source == 'local' %}
+                                        <i class="bi bi-person-circle event-icon" style="color: #fff; font-size: 16px;"></i>
+                                    {% else %}
+                                        <div class="event-icon"></div>
                                     {% endif %}
+                                    <span>{{ event.title }}</span>
                                 </div>
                             {% endfor %}
                         </div>
-                    </div>
-                {% endif %}
+                    {% endif %}
+                </div>
             {% endfor %}
         </div>
     </div>
 </div>
 
-<!-- BOOTSTRAP MODAL FOR EVENT DETAILS (Your modal code is good) -->
 <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -124,13 +151,41 @@
     </div>
 </div>
 
-
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const calendarContainer = document.querySelector('.main-content');
     
-    // --- MODAL LOGIC (This is already correct) ---
-    function initializeModalEventListeners() {
+    // --- FILTERING LOGIC ---
+    const filterCheckboxes = document.querySelectorAll('.calendar-filter');
+    function updateEventVisibility() {
+        const visibleSources = [];
+        const visibleAccounts = [];
+        filterCheckboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                if (checkbox.dataset.filterType === 'source') {
+                    visibleSources.push(checkbox.dataset.filterValue);
+                } else if (checkbox.dataset.filterType === 'account') {
+                    visibleAccounts.push(checkbox.dataset.filterValue);
+                }
+            }
+        });
+        document.querySelectorAll('.event').forEach(eventEl => {
+            const eventSource = eventEl.dataset.eventSource;
+            const socialAccountId = eventEl.dataset.socialAccountId;
+            let isVisible = false;
+            if (eventSource === 'local' && visibleSources.includes('local')) {
+                isVisible = true;
+            } else if (visibleAccounts.includes(socialAccountId)) {
+                isVisible = true;
+            }
+            eventEl.style.display = isVisible ? 'flex' : 'none';
+        });
+    }
+    filterCheckboxes.forEach(checkbox => checkbox.addEventListener('change', updateEventVisibility));
+    
+    // --- MODAL, WEBSOCKET, AND COPY BUTTON LOGIC ---
+    function initializeAppFeatures() {
+        // MODAL LOGIC
         const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
         document.querySelectorAll('.event').forEach(eventEl => {
             eventEl.addEventListener('click', function () {
@@ -140,7 +195,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     .then(response => response.json())
                     .then(data => {
                         document.getElementById('modal-title').textContent = data.title;
-                        document.getElementById('modal-description').textContent = data.description || 'No description.';
+                        document.getElementById('modal-description').textContent = data.description || 'No description provided.';
                         document.getElementById('modal-start-time').textContent = data.start_time;
                         document.getElementById('modal-end-time').textContent = data.end_time || 'N/A';
                         document.getElementById('modal-location').textContent = data.location || 'N/A';
@@ -156,47 +211,48 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
             });
         });
+
+        // WEBSOCKET LOGIC
+        {% if user.is_authenticated %}
+            const userSocket = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/");
+            userSocket.onmessage = function (e) {
+                const data = JSON.parse(e.data);
+                if (data.update === "calendar_changed") {
+                    console.log("Real-time update received! Fetching new calendar content...");
+                    fetch(window.location.href)
+                        .then(response => response.text())
+                        .then(html => {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            const newMainContent = doc.querySelector('.main-content');
+                            if (newMainContent) {
+                                calendarContainer.innerHTML = newMainContent.innerHTML;
+                                initializeAppFeatures();
+                                updateEventVisibility();
+                            }
+                        });
+                }
+            };
+            userSocket.onclose = function (e) { console.error("WebSocket closed unexpectedly."); };
+        {% endif %}
+
+        // COPY BUTTON LOGIC
+        const copyBtn = document.getElementById('copy-url-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', function() {
+                const urlInput = document.getElementById('sharing-url-input');
+                urlInput.select();
+                urlInput.setSelectionRange(0, 99999); // For mobile devices
+                navigator.clipboard.writeText(urlInput.value);
+                this.innerHTML = '<i class="bi bi-check-lg"></i>';
+                setTimeout(() => { this.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 2000);
+            });
+        }
     }
     
-    // Initialize modals for the events that are loaded on the page first
-    initializeModalEventListeners();
-
-    // --- WEBSOCKET LOGIC (This is the critical fix) ---
-    {% if user.is_authenticated %}
-        const userSocket = new WebSocket(
-            (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/"
-        );
-
-        userSocket.onmessage = function (e) {
-            const data = JSON.parse(e.data);
-            if (data.update === "calendar_changed") {
-                console.log("Real-time update received! Fetching new calendar content...");
-                
-                // Instead of a full page reload, we fetch the current calendar URL
-                fetch(window.location.href)
-                    .then(response => response.text())
-                    .then(html => {
-                        // We use a little trick to parse the new HTML
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-                        
-                        // We find the calendar content in the new HTML
-                        const newCalendarContent = doc.querySelector('.main-content').innerHTML;
-                        
-                        // And we replace the content on our current page with the new content
-                        calendarContainer.innerHTML = newCalendarContent;
-                        
-                        // We must re-initialize the click listeners for the new events
-                        initializeModalEventListeners();
-                        console.log("Calendar updated in place.");
-                    });
-            }
-        };
-
-        userSocket.onclose = function (e) { 
-            console.error("WebSocket closed unexpectedly. Please refresh the page for real-time updates."); 
-        };
-    {% endif %}
+    // Run all initialization on page load
+    updateEventVisibility();
+    initializeAppFeatures();
 });
 </script>
 

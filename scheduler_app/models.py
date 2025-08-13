@@ -1,6 +1,8 @@
 # scheduler_app/models.py
 
 from django.db import models
+import uuid
+
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -21,7 +23,6 @@ class Event(models.Model):
     source = models.CharField(max_length=50, choices=[('google', 'Google'), ('microsoft', 'Microsoft'), ('local', 'Local')], default='local', db_index=True)
     event_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     
-    # This is the correct reference to the SocialAccount model
     social_account = models.ForeignKey('socialaccount.SocialAccount', on_delete=models.CASCADE, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -36,6 +37,7 @@ class Event(models.Model):
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    sharing_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     def __str__(self): return f"Profile of {self.user.username}"
 
 @receiver(post_save, sender=User)
@@ -44,7 +46,6 @@ def create_or_update_user_profile(sender, instance, created, **kwargs):
 
 
 class GoogleWebhookChannel(models.Model):
-    # THIS IS THE FIX: Make the field nullable to allow migrations on existing databases.
     social_account = models.OneToOneField(SocialAccount, on_delete=models.CASCADE, null=True, blank=True)
     channel_id = models.CharField(max_length=255, unique=True)
     resource_id = models.CharField(max_length=255)
@@ -53,23 +54,20 @@ class GoogleWebhookChannel(models.Model):
 
 
 class OutlookWebhookSubscription(models.Model):
-    # THIS IS THE FIX: Make the field nullable to allow migrations on existing databases.
     social_account = models.OneToOneField(SocialAccount, on_delete=models.CASCADE, null=True, blank=True)
     subscription_id = models.CharField(max_length=255, unique=True)
     expiration_datetime = models.DateTimeField()
     def __str__(self): return f"Outlook Sub for {self.social_account}"
 
-
-class SyncedCalendar(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    provider = models.CharField(max_length=50, choices=[('google', 'Google'), ('microsoft', 'Microsoft')])
-    calendar_id = models.CharField(max_length=255)
-    name = models.CharField(max_length=255)
-    # THIS IS THE FIX: Make the field nullable to allow migrations on existing databases.
-    social_account = models.ForeignKey(SocialAccount, on_delete=models.CASCADE, null=True, blank=True)
+# class SyncedCalendar(models.Model):
+#     user = models.ForeignKey(User, on_delete=models.CASCADE)
+#     provider = models.CharField(max_length=50, choices=[('google', 'Google'), ('microsoft', 'Microsoft')])
+#     calendar_id = models.CharField(max_length=255)
+#     name = models.CharField(max_length=255)
+#     social_account = models.ForeignKey(SocialAccount, on_delete=models.CASCADE, null=True, blank=True)
     
-    class Meta:
-        unique_together = ('user', 'provider', 'calendar_id')
+#     class Meta:
+#         unique_together = ('user', 'provider', 'calendar_id')
 
-    def __str__(self):
-        return f"{self.name} ({self.provider}) for {self.user.username}"
+#     def __str__(self):
+#         return f"{self.name} ({self.provider}) for {self.user.username}"

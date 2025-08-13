@@ -1,0 +1,15 @@
+{% extends "scheduler_app/base_public.html" %}
+
+{% block content %}
+<div class="container mt-5 text-center" style="max-width: 600px;">
+    <div class="card shadow-sm">
+        <div class="card-body p-4">
+            <h2 class="text-success mb-3"><i class="bi bi-check-circle-fill"></i> You're Booked!</h2>
+            <p class="lead">Your meeting with <strong>{{ owner.username }}</strong> has been scheduled.</p>
+            <p>An email confirmation has been sent.</p>
+            <hr>
+            <p class="mb-0"><strong>Details:</strong> {{ start_time|date:"l, F j, Y" }} at {{ start_time|date:"h:i A" }}</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

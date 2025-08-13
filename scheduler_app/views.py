@@ -1,452 +1,23 @@
-# # scheduler_app/views.py
-
-
-# from django.conf import settings
-
-# # scheduler_app/views.py
-
-# from rest_framework.authtoken.models import Token
-
-# import datetime
-# import calendar as cal
-# import logging
-# import uuid
-# import requests
-# import json
-# from django.contrib.auth.models import User
-
-# from django.shortcuts import render, redirect, get_object_or_404
-# from django.contrib import messages
-# from django.contrib.auth.decorators import login_required
-# from django.http import HttpResponse, JsonResponse
-# from django.views.decorators.csrf import csrf_exempt
-
-# from allauth.socialaccount.models import SocialToken,SocialAccount
-# from google.oauth2.credentials import Credentials
-# from googleapiclient.discovery import build
-# from google.auth.transport.requests import Request
-# from dateutil import parser
-# from asgiref.sync import async_to_sync
-# from channels.layers import get_channel_layer
-
-# from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription,SyncedCalendar
-# from .forms import EventForm
-# from datetime import date
-
-# from django.shortcuts import redirect
-# from django.utils import timezone
-
-# logger = logging.getLogger(__name__)
-
-# def home(request):
-#     today = date.today()
-#     context = {'year': today.year, 'month': today.month}
-#     return render(request, 'scheduler_app/home.html', context)
-
-# @login_required
-# def add_event(request):
-#     """
-#     This is the corrected version of the add_event view.
-#     """
-#     if request.method == 'POST':
-#         form = EventForm(request.POST)
-#         if form.is_valid():
-#             event = form.save(commit=False)
-#             event.user = request.user
-#             event.source = 'local'
-#             event.save()
-#             new_event_date = form.cleaned_data['date']
-#             return redirect('calendar', year=new_event_date.year, month=new_event_date.month)
-#     else:
-#         form = EventForm(initial={'date': timezone.now().date()})
-    
-#     today = timezone.now()
-#     context = {
-#         'form': form,
-#         'year': today.year,
-#         'month': today.month
-#     }
-#     return render(request, 'scheduler_app/add_event.html', context)
-
-
-# @login_required
-# def calendar_view(request, year, month):
-#     """
-#     This is the final, correct view for displaying the calendar.
-#     It contains the definitive fix for the event grouping logic.
-#     """
-#     print('inside the calendar_view')
-#     year, month = int(year), int(month)
-    
-#     # Date calculations for navigation
-#     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
-#     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
-    
-#     # Get all events for the logged-in user for the given month and year
-#     print(request.user)
-#     all_user_events = Event.objects.filter(
-#         user=request.user,
-#         date__year=year,
-#         date__month=month
-#     ).order_by('start_time')
-#     print(all_user_events)
-#     # Prepare events, grouping them by day
-#     num_days_in_month = cal.monthrange(year, month)[1]
-#     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
-    
-#     for event in all_user_events:
-#         # THIS IS THE CRITICAL FIX:
-#         # We ensure the day of the event exists as a key in our dictionary
-#         # before we try to append the event data to its list.
-#         day_of_event = event.date.day
-#         if day_of_event in events_by_day:
-#             events_by_day[day_of_event].append({
-#                 'id': event.id,
-#                 'title': event.title,
-#                 'source': event.source,
-#                 'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day'
-#             })
-
-#     # Prepare the calendar grid data structure for the template
-#     first_weekday = cal.monthrange(year, month)[0]
-#     start_day_of_week = (first_weekday + 1) % 7
-#     days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
-#     for day in range(1, num_days_in_month + 1):
-#         days_data.append({
-#             'day': day,
-#             'events': events_by_day.get(day, []), # Use .get() for safety
-#             'is_placeholder': False
-#         })
-
-#     # Prepare a clean list of connected social accounts for the sidebar
-#     all_social_accounts = SocialAccount.objects.filter(user=request.user)
-#     google_accounts_list = [
-#         {'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')}
-#         for acc in all_social_accounts.filter(provider='google')
-#     ]
-#     microsoft_accounts_list = [
-#         {'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)')}
-#         for acc in all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient'])
-#     ]
-        
-#     context = {
-#         'year': year,
-#         'month': month,
-#         'month_name': cal.month_name[month],
-#         'days_data': days_data,
-#         'prev_year': prev_year,
-#         'prev_month': prev_month,
-#         'next_year': next_year,
-#         'next_month': next_month,
-#         'google_accounts': google_accounts_list,
-#         'microsoft_accounts': microsoft_accounts_list,
-#     }
-#     return render(request, 'scheduler_app/calendar.html', context)
-
-# @login_required
-# def event_detail_api(request, event_id):
-#     event = get_object_or_404(Event, id=event_id, user=request.user)
-#     account_email = None
-#     if event.social_account:
-#         account_email = event.social_account.extra_data.get('email') or event.social_account.extra_data.get('mail')
-#     data = {
-#         'id': event.id,
-#         'title': event.title,
-#         'description': event.description,
-#         'date': event.date.strftime('%Y-%m-%d'),
-#         'start_time': event.start_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.start_time else "All-day",
-#         'end_time': event.end_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.end_time else "",
-#         'location': event.location,
-#         'meeting_link': event.meeting_link,
-#         'source': event.source,
-#         'account_email': account_email,
-#     }
-#     return JsonResponse(data)
-
-# @login_required
-# def disconnect_social_account(request, account_id):
-#     try:
-#         social_account = get_object_or_404(SocialAccount, id=account_id, user=request.user)
-#         provider_name = social_account.get_provider().name
-#         Event.objects.filter(social_account=social_account).delete()
-#         social_account.delete()
-#         messages.success(request, f"Successfully disconnected your {provider_name} account.")
-#     except Exception as e:
-#         messages.error(request, f"An error occurred: {e}")
-#     today = timezone.now()
-#     return redirect('calendar', year=today.year, month=today.month)
-
-
-
-
-# @login_required
-# def redirect_after_login(request):
-#     """
-#     This is the single, final destination after any successful login or social connect.
-#     It simply redirects the user to the current month's calendar.
-#     """
-#     today = timezone.now()
-#     logger.info(f"Redirecting user {request.user.username} to current month: {today.month}/{today.year}")
-#     return redirect('calendar', year=today.year, month=today.month)
-
-
-# # --- THIS IS THE FINAL, CORRECTED GOOGLE WEBHOOK RECEIVER ---
-# @csrf_exempt
-# def google_webhook_receiver(request):
-#     channel_id = request.headers.get('X-Goog-Channel-ID') or request.META.get('HTTP_X_GOOG_CHANNEL_ID')
-#     resource_state = request.headers.get('X-Goog-Resource-State') or request.META.get('HTTP_X_GOOG_RESOURCE_STATE')
-#     logger.info(f"Received Google webhook: Channel={channel_id}, State={resource_state}")
-
-#     if not channel_id:
-#         return HttpResponse("Missing Channel ID", status=200)
-
-#     try:
-#         webhook = GoogleWebhookChannel.objects.get(channel_id=channel_id)
-#     except GoogleWebhookChannel.DoesNotExist:
-#         logger.warning(f"Unknown Google channel {channel_id}")
-#         return HttpResponse("Unknown channel", status=200)
-
-#     # Look up SocialAccount by stored id to get the correct SocialToken and user
-#     try:
-#         social_acc = SocialAccount.objects.get(id=webhook.social_account_id)
-#     except SocialAccount.DoesNotExist:
-#         logger.error(f"No SocialAccount found with id {webhook.social_account_id}")
-#         return HttpResponse("No social account", status=200)
-
-#     user = social_acc.user
-
-#     if resource_state not in ['exists', 'sync', 'updated', 'deleted']:
-#         logger.info(f"Notification ignored: state is '{resource_state}'.")
-#         return HttpResponse("Notification ignored", status=200)
-
-#     try:
-#         token = SocialToken.objects.get(account=social_acc)
-#         credentials = Credentials(
-#             token=token.token, refresh_token=token.token_secret,
-#             token_uri='https://oauth2.googleapis.com/token',
-#             client_id=token.app.client_id, client_secret=token.app.secret
-#         )
-#         if credentials.expired and credentials.refresh_token:
-#             credentials.refresh(Request())
-#             token.token = credentials.token
-#             token.save()
-
-#         service = build('calendar', 'v3', credentials=credentials)
-#         events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
-#         google_events_data = events_result.get('items', [])
-#         google_event_ids = {e['id'] for e in google_events_data if e.get('id')}
-
-#         # Upsert events into DB under the app user and mark synced_calendar if present
-#         for event_data in google_events_data:
-#             event_id = event_data.get('id')
-#             if not event_id:
-#                 continue
-#             start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
-#             if not start_raw:
-#                 continue
-#             start_time = parser.parse(start_raw)
-#             end_raw = event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')
-#             end_time = parser.parse(end_raw) if end_raw else None
-
-#             Event.objects.update_or_create(
-#                 user=user,
-#                 source='google',
-#                 event_id=event_id,
-#                 defaults={
-#                     'title': event_data.get('summary', 'No Title'),
-#                     'description': event_data.get('description', ''),
-#                     'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
-#                     'etag': event_data.get('etag', ''),
-#                     'meeting_link': event_data.get('hangoutLink', ''),
-#                     'location': event_data.get('location', ''),
-#                     'is_recurring': 'recurringEventId' in event_data
-#                 }
-#             )
-
-#         # Remove deleted events (for this user + provider)
-#         Event.objects.filter(user=user, source='google').exclude(event_id__in=google_event_ids).delete()
-
-#         # Notify via channels
-#         channel_layer = get_channel_layer()
-#         async_to_sync(channel_layer.group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
-#         logger.info(f"Google sync complete. Sent update to WebSocket for user {user.id}")
-
-#     except Exception as e:
-#         logger.error(f"Error syncing Google webhook for social_acc {webhook.social_account_id}: {e}", exc_info=True)
-#         return HttpResponse("Sync failure", status=500)
-
-#     return HttpResponse("OK", status=200)
-
-
-# @csrf_exempt
-# def outlook_webhook_receiver(request):
-#     validation_token = request.GET.get('validationToken')
-#     if validation_token:
-#         logger.info("Received Outlook validation request. Responding with token.")
-#         return HttpResponse(validation_token, content_type='text/plain', status=200)
-
-#     try:
-#         notification = json.loads(request.body.decode('utf-8') or '{}')
-#         if not notification:
-#             logger.warning("Empty Outlook notification body")
-#             return HttpResponse(status=200)
-
-#         # The notification includes subscriptionId; there may be multiple items
-#         for notif in notification.get('value', []):
-#             subscription_id = notif.get('subscriptionId')
-#             if not subscription_id:
-#                 continue
-#             try:
-#                 sub = OutlookWebhookSubscription.objects.get(subscription_id=subscription_id)
-#             except OutlookWebhookSubscription.DoesNotExist:
-#                 logger.warning(f"No Outlook subscription found with id {subscription_id}")
-#                 continue
-
-#             # Find the social account and token
-#             try:
-#                 social_acc = SocialAccount.objects.get(id=sub.social_account_id)
-#             except SocialAccount.DoesNotExist:
-#                 logger.error(f"No SocialAccount for id {sub.social_account_id}")
-#                 continue
-
-#             user = social_acc.user
-#             # Use the token for this social account
-#             try:
-#                 token = SocialToken.objects.get(account=social_acc)
-#                 headers = {'Authorization': f'Bearer {token.token}'}
-#                 graph_api_endpoint = 'https://graph.microsoft.com/v1.0/me/events'
-#                 response = requests.get(graph_api_endpoint, headers=headers)
-#                 response.raise_for_status()
-#                 outlook_events_data = response.json().get('value', [])
-#             except Exception as e:
-#                 logger.error(f"Error fetching Outlook events for social_account {sub.social_account_id}: {e}", exc_info=True)
-#                 continue
-
-#             outlook_event_ids_in_sync = []
-#             for event_data in outlook_events_data:
-#                 event_id = event_data.get('id')
-#                 if not event_id:
-#                     continue
-#                 outlook_event_ids_in_sync.append(event_id)
-#                 start_raw = event_data.get('start', {}).get('dateTime')
-#                 if not start_raw:
-#                     continue
-#                 start_time = parser.parse(start_raw)
-#                 end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
-#                 Event.objects.update_or_create(
-#                     user=user,
-#                     source='microsoft',
-#                     event_id=event_id,
-#                     defaults={
-#                         'title': event_data.get('subject', 'No Title'),
-#                         'description': event_data.get('bodyPreview', ''),
-#                         'date': start_time.date(), 'start_time': start_time, 'end_time': end_time,
-#                         'etag': event_data.get('@odata.etag', ''),
-#                         'location': event_data.get('location', {}).get('displayName', ''),
-#                     }
-#                 )
-
-#             Event.objects.filter(user=user, source='microsoft').exclude(event_id__in=outlook_event_ids_in_sync).delete()
-
-#             channel_layer = get_channel_layer()
-#             async_to_sync(channel_layer.group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
-#             logger.info(f"Outlook sync complete. Sent update to WebSocket for user {user.id}")
-
-#     except Exception as e:
-#         logger.error(f"Error processing Outlook webhook: {e}", exc_info=True)
-#         # still return 200 so provider considers notification delivered
-#     return HttpResponse(status=200)
-
-
-
-
-
-
-
-
-# login_required
-# def select_calendars_view(request, provider):
-#     """
-#     Fetches the list of available calendars from Google/Outlook and
-#     presents them to the user to choose which ones to sync.
-#     """
-#     user = request.user
-#     calendars = []
-#     error = None
-
-#     try:
-#         token = SocialToken.objects.get(account__user=user, account__provider=provider)
-        
-#         if provider == 'google':
-#             credentials = Credentials(...) # Build credentials as before
-#             service = build('calendar', 'v3', credentials=credentials)
-#             calendar_list = service.calendarList().list().execute()
-#             calendars = [{'id': cal['id'], 'name': cal['summary']} for cal in calendar_list.get('items', [])]
-        
-#         elif provider == 'microsoft' or 'MasterCalendarClient':
-#             headers = {'Authorization': f'Bearer {token.token}'}
-#             response = requests.get('https://graph.microsoft.com/v1.0/me/calendars', headers=headers)
-#             response.raise_for_status()
-#             calendar_list = response.json().get('value', [])
-#             calendars = [{'id': cal['id'], 'name': cal['name']} for cal in calendar_list]
-            
-#     except Exception as e:
-#         error = f"Could not fetch your calendar list: {e}"
-#         logger.error(error)
-
-#     # Get the list of calendars that are ALREADY synced for this user
-#     synced_calendars = SyncedCalendar.objects.filter(user=user, provider=provider).values_list('calendar_id', flat=True)
-
-#     context = {
-#         'provider': provider,
-#         'calendars': calendars,
-#         'synced_calendars': synced_calendars,
-#         'error': error,
-#     }
-#     return render(request, 'scheduler_app/select_calendars.html', context)
-
-
-# @login_required
-# def save_calendar_selection_view(request, provider):
-#     """
-#     Saves the user's choices from the 'select_calendars' form.
-#     """
-#     if request.method == 'POST':
-#         user = request.user
-#         selected_calendar_ids = request.POST.getlist('calendar_ids')
-        
-#         # Here you would add the full logic to:
-#         # 1. Fetch calendar names for the selected IDs.
-#         # 2. Save the choices to the SyncedCalendar model.
-#         # 3. Trigger the initial full sync for each selected calendar.
-#         # 4. Register a webhook for each selected calendar.
-        
-#         messages.success(request, "Your calendar selections have been saved and are now syncing.")
-#         today = date.today()
-#         return redirect('calendar', year=today.year, month=today.month)
-
-#     # Redirect away if accessed via GET
-#     return redirect('home')
-
-
-
-
-
-
 # scheduler_app/views.py
 
+from django.core.mail import send_mail
+from django.conf import settings
+from django.shortcuts import render, redirect, get_object_or_404
 import calendar as cal
 import logging
+import base64
+from datetime import timedelta,time, datetime
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from allauth.socialaccount.models import SocialAccount, SocialToken
-from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription
+from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile
 from .forms import EventForm
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 import json
+from django.urls import reverse
 from dateutil import parser
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -459,13 +30,30 @@ logger = logging.getLogger(__name__)
 
 # --- CORE APPLICATION VIEWS ---
 
+def get_microsoft_avatar(token: SocialToken):
+    try:
+        headers = {'Authorization': f'Bearer {token.token}'}
+        photo_endpoint = 'https://graph.microsoft.com/v1.0/me/photo/$value'
+        response = requests.get(photo_endpoint, headers=headers)
+        if response.status_code == 200:
+            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            return f"data:{response.headers['Content-Type']};base64,{image_base64}"
+    except Exception as e:
+        logger.error(f"Failed to fetch Microsoft avatar for token {token.id}: {e}")
+    return None
+
+# --- CORE APPLICATION VIEWS ---
+
 @login_required
 def calendar_view(request, year, month):
+    """
+    This is the final, corrected version with the TypeError fixed.
+    """
     year, month = int(year), int(month)
     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
     
-    all_user_events = Event.objects.filter(user=request.user, date__year=year, date__month=month).order_by('start_time')
+    all_user_events = Event.objects.filter(user=request.user, date__year=year, date__month=month).select_related('social_account').order_by('start_time')
     
     num_days_in_month = cal.monthrange(year, month)[1]
     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
@@ -473,26 +61,41 @@ def calendar_view(request, year, month):
     for event in all_user_events:
         day_of_event = event.date.day
         if day_of_event in events_by_day:
+            profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
             events_by_day[day_of_event].append({
                 'id': event.id, 'title': event.title, 'source': event.source,
-                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day'
+                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
+                'social_account_id': event.social_account_id, 'profile_pic_url': profile_pic_url
             })
 
-    first_weekday = cal.monthrange(year, month)[0]
+    # THIS IS THE CRITICAL FIX for the TypeError
+    first_weekday, num_days = cal.monthrange(year, month)
     start_day_of_week = (first_weekday + 1) % 7
     days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
-    for day in range(1, num_days_in_month + 1):
+    for day in range(1, num_days + 1):
         days_data.append({'day': day, 'events': events_by_day.get(day, []), 'is_placeholder': False})
 
+    # --- The rest of the view is correct ---
     all_social_accounts = SocialAccount.objects.filter(user=request.user)
     google_accounts_list = [{'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')} for acc in all_social_accounts.filter(provider='google')]
-    microsoft_accounts_list = [{'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)')} for acc in all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient'])]
+    
+    microsoft_accounts_list = []
+    microsoft_accounts = all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient']).prefetch_related('socialtoken_set')
+    for acc in microsoft_accounts:
+        token = acc.socialtoken_set.first()
+        microsoft_accounts_list.append({
+            'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)'),
+            'avatar_url': get_microsoft_avatar(token) if token else None
+        })
+    
+    sharing_url = request.build_absolute_uri(reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid}))
         
     context = {
         'year': year, 'month': month, 'month_name': cal.month_name[month],
         'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month,
         'next_year': next_year, 'next_month': next_month,
         'google_accounts': google_accounts_list, 'microsoft_accounts': microsoft_accounts_list,
+        'sharing_url': sharing_url
     }
     return render(request, 'scheduler_app/calendar.html', context)
 
@@ -517,7 +120,6 @@ def redirect_after_login(request):
     return redirect('calendar', year=today.year, month=today.month)
 
 
-@login_required
 def add_event(request):
     if request.method == 'POST':
         form = EventForm(request.POST)
@@ -546,7 +148,6 @@ def event_detail_api(request, event_id):
     return JsonResponse(data)
 
 
-# --- WEBHOOK RECEIVERS (WITH THE FINAL FIX) ---
 
 @csrf_exempt
 def google_webhook_receiver(request):
@@ -643,3 +244,120 @@ def outlook_webhook_receiver(request):
         logger.error(f"Error decoding Outlook webhook body: {e}", exc_info=True)
     
     return HttpResponse(status=202) # Use 202 Accepted for webhooks
+
+
+def booking_view(request, sharing_uuid):
+    """
+    Public page for viewing available slots for a user.
+    """
+    profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
+    owner = profile.user
+    
+    # For now, we'll hardcode the meeting duration to 30 minutes.
+    # We can make this a setting in UserProfile later if needed.
+    meeting_duration = 30
+    
+    # We will show availability for the next 14 days
+    today = timezone.now().date()
+    availability = {}
+    for i in range(14):
+        current_date = today + timedelta(days=i)
+        
+        # Get all existing events for the calendar owner on this day
+        busy_times = Event.objects.filter(user=owner, date=current_date, start_time__isnull=False, end_time__isnull=False).values_list('start_time', 'end_time')
+        
+        # Generate potential slots (e.g., from 9am to 5pm)
+        potential_slots = []
+        slot_time = timezone.make_aware(datetime.combine(current_date, time(9, 0)))
+        end_of_workday = slot_time.replace(hour=17)
+
+        while slot_time < end_of_workday:
+            potential_slots.append(slot_time)
+            slot_time += timedelta(minutes=meeting_duration)
+            
+        # Filter out slots that are busy
+        available_slots = []
+        for slot in potential_slots:
+            is_free = True
+            slot_end = slot + timedelta(minutes=meeting_duration)
+            for busy_start, busy_end in busy_times:
+                # Check for any overlap
+                if busy_start < slot_end and busy_end > slot:
+                    is_free = False
+                    break
+            if is_free:
+                available_slots.append(slot)
+        
+        if available_slots:
+            availability[current_date] = available_slots
+
+    context = {
+        'owner': owner,
+        'availability': availability,
+        'sharing_uuid': sharing_uuid,
+    }
+    return render(request, 'scheduler_app/booking_page.html', context)
+
+
+def confirm_booking_view(request, sharing_uuid, datetime_iso):
+    """
+    Handles the final confirmation, creates the event, and sends a confirmation email.
+    """
+    profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
+    owner = profile.user
+    
+    meeting_duration = 30
+    start_time = parser.parse(datetime_iso)
+    end_time = start_time + timedelta(minutes=meeting_duration)
+
+    if request.method == 'POST':
+        booker_name = request.POST.get('name', 'Guest')
+        booker_email = request.POST.get('email', 'no-email@example.com')
+        meeting_title = request.POST.get('title', f"Meeting with {booker_name}")
+        
+        # 1. Create the new local event for the calendar OWNER
+        Event.objects.create(
+            user=owner,
+            source='local',
+            title=meeting_title,
+            description=f"Booked via public link by: {booker_name} ({booker_email})",
+            date=start_time.date(),
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        # --- THIS IS THE NEW EMAIL LOGIC ---
+        try:
+            subject = f"Confirmed: {meeting_title} with {owner.username}"
+            
+            # Format the time for the email body
+            email_start_time = start_time.strftime("%A, %B %d, %Y at %I:%M %p %Z")
+            
+            message = (
+                f"Hi {booker_name},\n\n"
+                f"Your meeting has been scheduled with {owner.username}.\n\n"
+                f"Event: {meeting_title}\n"
+                f"Time: {email_start_time}\n\n"
+                f"This event has been added to {owner.username}'s calendar."
+            )
+            
+            from_email = settings.DEFAULT_FROM_EMAIL
+            recipient_list = [booker_email]
+            
+            send_mail(subject, message, from_email, recipient_list)
+            
+            logger.info(f"Confirmation email sent to {booker_email} for meeting with {owner.username}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send confirmation email to {booker_email}: {e}")
+        # --- END OF EMAIL LOGIC ---
+        
+        # 2. Redirect to the success page
+        return render(request, 'scheduler_app/booking_successful.html', {'owner': owner, 'start_time': start_time})
+
+    context = {
+        'owner': owner,
+        'start_time': start_time,
+        'end_time': end_time,
+    }
+    return render(request, 'scheduler_app/confirm_booking.html', context)

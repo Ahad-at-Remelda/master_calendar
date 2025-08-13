@@ -52,3 +52,4 @@ class EventForm(forms.ModelForm):
             )
 
         return cleaned_data
+    
