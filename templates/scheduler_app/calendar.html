@@ -20,6 +20,7 @@
         .google-event { background-color: #28a745; }
         .local-event { background-color: #0dcaf0; }
         .microsoft-event { background-color: #0078D4; }
+        .booked_meeting-event { background-color: #6f42c1; } /* New color for booked events */
         .day-name { font-weight: bold; text-align: center; padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; }
     </style>
 </head>
@@ -36,6 +37,10 @@
             <label class="list-group-item d-flex gap-3 align-items-center">
                 <input class="form-check-input flex-shrink-0 calendar-filter" type="checkbox" data-filter-type="source" data-filter-value="local" checked>
                 <span><i class="bi bi-calendar3 text-info"></i> Local Events</span>
+            </label>
+            <label class="list-group-item d-flex gap-3 align-items-center">
+                <input class="form-check-input flex-shrink-0 calendar-filter" type="checkbox" data-filter-type="source" data-filter-value="booked_meeting" checked>
+                <span><i class="bi bi-person-check-fill" style="color: #6f42c1;"></i> Booked Meetings</span>
             </label>
             {% for account in google_accounts %}
             <div class="list-group-item d-flex justify-content-between align-items-center">
@@ -64,23 +69,21 @@
             <a href="{% provider_login_url 'microsoft' process='connect' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus"></i> Connect Outlook Account</a>
         </div>
         <hr>
-
-        <!-- =============================================== -->
-        <!-- == THIS IS THE NEW, SIMPLIFIED SHARING SECTION == -->
-        <!-- =============================================== -->
-        <h5>Share My Booking Link</h5>
+        
+        <h5>Booking & Sharing</h5>
+        <div class="d-grid gap-2 mb-3">
+            <!-- THIS IS THE NEW SETTINGS BUTTON -->
+            <a class="btn btn-outline-dark" href="{% url 'user_settings' %}"><i class="bi bi-gear-fill"></i> Booking Settings</a>
+        </div>
         {% if sharing_url %}
+            <label for="sharing-url-input" class="form-label"><small>Your Public Booking Link:</small></label>
             <div class="input-group">
                 <input type="text" id="sharing-url-input" class="form-control form-control-sm" value="{{ sharing_url }}" readonly>
-                <button class="btn btn-outline-secondary" type="button" id="copy-url-btn" title="Copy to clipboard">
-                    <i class="bi bi-clipboard"></i>
-                </button>
+                <button class="btn btn-outline-secondary" type="button" id="copy-url-btn" title="Copy to clipboard"><i class="bi bi-clipboard"></i></button>
             </div>
         {% else %}
              <p class="text-muted small">An error occurred generating your sharing link.</p>
         {% endif %}
-        <!-- =============================================== -->
-        
         <hr>
 
         <div class="d-grid">

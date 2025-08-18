@@ -1,0 +1,65 @@
+{% extends "scheduler_app/base_public.html" %}
+
+{% block title %}Settings - Master Calendar{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 800px;">
+    <h2 class="mb-4">Settings</h2>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card shadow-sm">
+        <div class="card-header">
+            <h5 class="mb-0">Primary Booking Calendar</h5>
+        </div>
+        <div class="card-body">
+            <p class="card-text text-muted">
+                Select which calendar you want to use for creating new events when someone books a meeting with you. This account will be used to send the official Google Calendar invitations.
+            </p>
+            
+            <form method="post" action="{% url 'user_settings' %}">
+                {% csrf_token %}
+                <div class="list-group">
+                    {% for account in connected_accounts %}
+                        <label class="list-group-item d-flex gap-3">
+                            <input class="form-check-input flex-shrink-0" 
+                                   type="radio" 
+                                   name="primary_booking_calendar" 
+                                   value="{{ account.id }}"
+                                   {% if profile.primary_booking_calendar.id == account.id %}checked{% endif %}>
+                            <span>
+                                {% if account.provider == 'google' %}
+                                    <i class="bi bi-google text-success"></i>
+                                {% else %}
+                                    <i class="bi bi-microsoft text-primary"></i>
+                                {% endif %}
+                                <!-- THIS IS THE FIX: We now use the simple 'email' key -->
+                                {{ account.email }}
+                                {% if profile.primary_booking_calendar.id == account.id %}
+                                    <span class="badge bg-primary rounded-pill">Primary</span>
+                                {% endif %}
+                            </span>
+                        </label>
+                    {% empty %}
+                        <div class="alert alert-warning">
+                            You have no social accounts connected. Connect a Google or Outlook account to enable booking features.
+                        </div>
+                    {% endfor %}
+                </div>
+                
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                    <a href="{% url 'calendar' year=2025 month=8 %}" class="btn btn-secondary">Back to Calendar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
