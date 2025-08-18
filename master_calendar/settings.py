@@ -7,7 +7,7 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL= 'https://5dd3d455c498.ngrok-free.app'
+NGROK_URL= 'https://c0e221d7bdac.ngrok-free.app'
 
 # --- THIS IS THE CRITICAL FIX ---
 # Hostnames must NOT include 'http://' or 'https://'.
@@ -15,11 +15,11 @@ NGROK_URL= 'https://5dd3d455c498.ngrok-free.app'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '5dd3d455c498.ngrok-free.app',
+    'c0e221d7bdac.ngrok-free.app',
 ]
 # --------------------------------
 CSRF_TRUSTED_ORIGINS = [
-    'https://5dd3d455c498.ngrok-free.app',
+    'https://c0e221d7bdac.ngrok-free.app',
     'https://*.ngrok-free.app',
 ]
 
@@ -120,14 +120,11 @@ SOCIALACCOUNT_PROVIDERS = {
         'SCOPE': [
             'profile',
             'email',
-            'https://www.googleapis.com/auth/calendar.readonly',
+            #'https://www.googleapis.com/auth/calendar.readonly',
             'https://www.googleapis.com/auth/calendar.events',
         ],
         'AUTH_PARAMS': {
             'access_type': 'offline',
-            # THIS IS THE CRITICAL FIX:
-            # This forces Google to show the consent screen every time,
-            # which guarantees that we will always receive a refresh_token.
             'prompt': 'consent',
         }
     },

@@ -1,12 +1,11 @@
 # scheduler_app/views.py
 
-from django.core.mail import send_mail
+from django.core.mail import send_mail,EmailMessage
 from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 import calendar as cal
 import logging,os
 import base64
-from django.core.mail import EmailMessage
 from ics import Calendar, Event as ICSEvent
 from datetime import timedelta,time, datetime
 from django.shortcuts import render, redirect, get_object_or_404
@@ -27,6 +26,9 @@ from google.auth.transport.requests import Request
 import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from ics import Calendar, Event as ICSEvent, Attendee
+from ics.attendee import Attendee
+
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +306,8 @@ def booking_view(request, sharing_uuid):
 
 def confirm_booking_view(request, sharing_uuid, datetime_iso):
     """
-    Handles confirmation, creates the event, and sends a calendar invitation email.
+    This is the final, correct version. It creates the event directly on the
+    owner's Google Calendar, which then sends the official, auto-accepting invitations.
     """
     profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
     owner = profile.user
@@ -319,67 +322,75 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
         meeting_title = request.POST.get('title', f"Meeting with {booker_name}")
         guest_list_str = request.POST.get('guests', '')
         
-        # Ensure we have a valid booker email to proceed
         if not booker_email:
-            messages.error(request, "A valid email address is required to book a meeting.")
-            # Re-render the form with an error
-            context = {'owner': owner, 'start_time': start_time, 'end_time': end_time}
+            # ... (error handling)
             return render(request, 'scheduler_app/confirm_booking_form.html', context)
 
         guest_emails = [email.strip() for email in guest_list_str.split(',') if email.strip()]
 
-        # 1. Create the local event for the owner's calendar
-        Event.objects.create(
-            user=owner, source='local', title=meeting_title,
-            description=f"Booked by: {booker_name} ({booker_email}). Guests: {', '.join(guest_emails)}",
-            date=start_time.date(), start_time=start_time, end_time=end_time
-        )
-        
-        # 2. Create the .ics calendar invitation file
-        cal_invite = Calendar()
-        ics_event = ICSEvent()
-        ics_event.name = meeting_title
-        ics_event.begin = start_time
-        ics_event.end = end_time
-        ics_event.organizer = owner.email or settings.DEFAULT_FROM_EMAIL
-        
-        # Add the booker and all guests as attendees
-        all_attendees = [booker_email] + guest_emails
-        for attendee_email in all_attendees:
-            ics_event.add_attendee(attendee_email)
-            
-        cal_invite.events.add(ics_event)
-        
-        # 3. Create and send the email with the .ics attachment
         try:
-            subject = f"Invitation: {meeting_title} with {owner.username}"
-            body = (
-                f"You have been invited to a meeting by {owner.username}.\n\n"
-                f"Event: {meeting_title}\n"
-                f"Time: {start_time.strftime('%A, %B %d, %Y at %I:%M %p %Z')}"
+            # Step 1: Find the primary Google SocialAccount for the owner.
+            # This will be the account that "sends" the invitation.
+            owner_google_account = SocialAccount.objects.get(user=owner, provider='google')
+            token = SocialToken.objects.get(account=owner_google_account)
+            
+            # Step 2: Build fresh credentials for the owner's account.
+            credentials = Credentials(
+                token=token.token, refresh_token=token.token_secret,
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=token.app.client_id, client_secret=token.app.secret
             )
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                token.token = credentials.token
+                token.save()
+
+            service = build('calendar', 'v3', credentials=credentials)
             
-            email = EmailMessage(
-                subject,
-                body,
-                from_email=settings.DEFAULT_FROM_EMAIL, # Sent from the Master Calendar email
-                to=all_attendees, # Sent to the booker and all guests
-            )
+            # Step 3: Prepare the attendee list for the Google API.
+            attendees = [
+                {'email': owner.email},      # The owner
+                {'email': booker_email},     # The booker (User 2)
+            ]
+            for guest_email in guest_emails:
+                attendees.append({'email': guest_email})
             
-            # Attach the calendar file with the correct MIME type
-            email.attach('invite.ics', str(cal_invite), 'text/calendar')
-            email.send()
-            logger.info(f"Calendar invitation sent successfully to {all_attendees}")
+            event_body = {
+                'summary': meeting_title,
+                'description': f"This event was booked using Master Calendar.",
+                'start': {'dateTime': start_time.isoformat(), 'timeZone': 'UTC'},
+                'end': {'dateTime': end_time.isoformat(), 'timeZone': 'UTC'},
+                'attendees': attendees,
+                'reminders': {'useDefault': True},
+            }
+
+            # Step 4: Insert the event into the owner's calendar via the API.
+            # `sendNotifications=True` tells Google to send the official invitations from the owner's account.
+            created_event = service.events().insert(
+                calendarId='primary',
+                body=event_body,
+                sendNotifications=True 
+            ).execute()
             
+            logger.info(f"Successfully created Google Calendar event ({created_event.get('id')}) on behalf of user {owner.username}")
+            
+            # Also save a local copy so it appears instantly in our app
+            # Event.objects.create(
+            #     user=owner, source='google', social_account=owner_google_account,
+            #     event_id=created_event.get('id'), title=meeting_title,
+            #     date=start_time.date(), start_time=start_time, end_time=end_time
+            # )
+
+        except SocialAccount.DoesNotExist:
+            return HttpResponse("Booking is unavailable: The calendar owner has not connected a Google account.", status=503)
+        except SocialAccount.MultipleObjectsReturned:
+            # This is a key error to handle. A user needs to designate one primary calendar for bookings.
+            return HttpResponse("Booking is unavailable: The calendar owner has multiple Google accounts. Please implement a primary calendar selection.", status=503)
         except Exception as e:
-            logger.error(f"Failed to send calendar invitation: {e}")
-            # Even if the email fails, we should still show a success page
+            logger.error(f"Failed to create Google Calendar event for user {owner.username}: {e}", exc_info=True)
+            return HttpResponse("An error occurred while creating the calendar event.", status=500)
             
         return render(request, 'scheduler_app/booking_successful.html', {'owner': owner, 'start_time': start_time})
 
-    context = {
-        'owner': owner,
-        'start_time': start_time,
-        'end_time': end_time,
-    }
+    context = {'owner': owner, 'start_time': start_time, 'end_time': end_time}
     return render(request, 'scheduler_app/confirm_booking.html', context)
