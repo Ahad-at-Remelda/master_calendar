@@ -1,12 +1,9 @@
 # scheduler_app/views.py
 
-from django.core.mail import send_mail,EmailMessage
-from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 import calendar as cal
-import logging,os
+import logging
 import base64
-from ics import Calendar, Event as ICSEvent
 from datetime import timedelta,time, datetime
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -26,13 +23,12 @@ from google.auth.transport.requests import Request
 import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from ics import Calendar, Event as ICSEvent, Attendee
+from datetime import timedelta, date
 
 
 
 logger = logging.getLogger(__name__)
 
-# --- CORE APPLICATION VIEWS ---
 
     
 def get_microsoft_avatar(token: SocialToken):
@@ -48,14 +44,63 @@ def get_microsoft_avatar(token: SocialToken):
     return None
 
 # --- CORE APPLICATION VIEWS ---
+def get_base_calendar_context(request):
+    """
+    A helper function to get common context data (like connected accounts and
+    sharing URLs) that is needed by all calendar views.
+    """
+    all_social_accounts = SocialAccount.objects.filter(user=request.user)
+    
+    google_accounts_list = [
+        {'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')} 
+        for acc in all_social_accounts.filter(provider='google')
+    ]
+    
+    microsoft_accounts_list = []
+    microsoft_accounts = all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient']).prefetch_related('socialtoken_set')
+    for acc in microsoft_accounts:
+        token = acc.socialtoken_set.first()
+        microsoft_accounts_list.append({
+            'id': acc.id,
+            'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)'),
+            'avatar_url': get_microsoft_avatar(token) if token else None
+        })
+    
+    sharing_url = request.build_absolute_uri(
+        reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid})
+    )
+    
+    today = timezone.now()
+    # URLs for the view toggle buttons
+    today_day_url = reverse('calendar_day', kwargs={'year': today.year, 'month': today.month, 'day': today.day})
+    today_week_url = reverse('calendar_week', kwargs={'year': today.isocalendar().year, 'week': today.isocalendar().week})
+    today_month_url = reverse('calendar_month', kwargs={'year': today.year, 'month': today.month})
+
+    return {
+        'google_accounts': google_accounts_list,
+        'microsoft_accounts': microsoft_accounts_list,
+        'sharing_url': sharing_url,
+        'today_day_url': today_day_url,
+        'today_week_url': today_week_url,
+        'today_month_url': today_month_url,
+    }
 
 @login_required
-def calendar_view(request, year, month):
+def calendar_view_month(request, year, month):
+    context = get_base_calendar_context(request)
     year, month = int(year), int(month)
-    prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
-    next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
     
-    all_user_events = Event.objects.filter(user=request.user, date__year=year, date__month=month).select_related('social_account').order_by('start_time')
+    current_date = date(year, month, 1)
+    # Correctly navigate to the previous month's first day
+    prev_month_date = (current_date - timedelta(days=1)).replace(day=1)
+    # Correctly navigate to the next month's first day
+    next_month_date = (current_date + timedelta(days=32)).replace(day=1)
+    
+    all_user_events = Event.objects.filter(
+        user=request.user, 
+        date__year=year, 
+        date__month=month
+    ).select_related('social_account').order_by('start_time')
     
     num_days_in_month = cal.monthrange(year, month)[1]
     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
@@ -67,37 +112,142 @@ def calendar_view(request, year, month):
             events_by_day[day_of_event].append({
                 'id': event.id, 'title': event.title, 'source': event.source,
                 'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
-                'social_account_id': event.social_account_id, 'profile_pic_url': profile_pic_url
+                'social_account_id': event.social_account_id,
+                'profile_pic_url': profile_pic_url
             })
-
+        
     first_weekday, num_days = cal.monthrange(year, month)
     start_day_of_week = (first_weekday + 1) % 7
     days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
     for day in range(1, num_days + 1):
         days_data.append({'day': day, 'events': events_by_day.get(day, []), 'is_placeholder': False})
-
-    all_social_accounts = SocialAccount.objects.filter(user=request.user)
-    google_accounts_list = [{'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')} for acc in all_social_accounts.filter(provider='google')]
-    
-    microsoft_accounts_list = []
-    microsoft_accounts = all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient']).prefetch_related('socialtoken_set')
-    for acc in microsoft_accounts:
-        token = acc.socialtoken_set.first()
-        microsoft_accounts_list.append({
-            'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)'),
-            'avatar_url': get_microsoft_avatar(token) if token else None
-        })
-    
-    sharing_url = request.build_absolute_uri(reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid}))
         
-    context = {
-        'year': year, 'month': month, 'month_name': cal.month_name[month],
-        'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month,
-        'next_year': next_year, 'next_month': next_month,
-        'google_accounts': google_accounts_list, 'microsoft_accounts': microsoft_accounts_list,
-        'sharing_url': sharing_url
-    }
+    context.update({
+        "view_mode": "month",
+        "header_title": current_date.strftime("%B %Y"),
+        "days_data": days_data,
+        "prev_url": reverse('calendar_month', kwargs={'year': prev_month_date.year, 'month': prev_month_date.month}),
+        "next_url": reverse('calendar_month', kwargs={'year': next_month_date.year, 'month': next_month_date.month}),
+    })
     return render(request, 'scheduler_app/calendar.html', context)
+
+@login_required
+def calendar_view_week(request, year, week):
+    context = get_base_calendar_context(request)
+    year, week = int(year), int(week)
+    
+    start_of_week = date.fromisocalendar(year, week, 1) # Monday
+    end_of_week = start_of_week + timedelta(days=6) # Sunday
+    prev_week_date = start_of_week - timedelta(days=7)
+    next_week_date = start_of_week + timedelta(days=7)
+    
+    week_days = [start_of_week + timedelta(days=i) for i in range(7)]
+    
+    all_user_events = Event.objects.filter(
+        user=request.user, 
+        date__range=[start_of_week, end_of_week]
+    ).select_related('social_account').order_by('start_time')
+
+    events_by_day = {d: [] for d in week_days}
+    for event in all_user_events:
+        if event.date in events_by_day:
+            profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
+            events_by_day[event.date].append({
+                'id': event.id, 'title': event.title, 'source': event.source,
+                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
+                'social_account_id': event.social_account_id,
+                'profile_pic_url': profile_pic_url
+            })
+        
+    context.update({
+        "view_mode": "week",
+        "header_title": f"{start_of_week.strftime('%b %d')} - {end_of_week.strftime('%b %d, %Y')}",
+        "week_days": [{'date': d, 'events': events_by_day.get(d, [])} for d in week_days],
+        "prev_url": reverse('calendar_week', kwargs={'year': prev_week_date.isocalendar().year, 'week': prev_week_date.isocalendar().week}),
+        "next_url": reverse('calendar_week', kwargs={'year': next_week_date.isocalendar().year, 'week': next_week_date.isocalendar().week}),
+    })
+    return render(request, 'scheduler_app/calendar.html', context)
+
+@login_required
+def calendar_view_day(request, year, month, day):
+    context = get_base_calendar_context(request)
+    
+    current_date = date(int(year), int(month), int(day))
+    prev_date = current_date - timedelta(days=1)
+    next_date = current_date + timedelta(days=1)
+    
+    all_user_events = Event.objects.filter(user=request.user, date=current_date).select_related('social_account').order_by('start_time')
+    
+    # We add profile picture information here as well
+    events_with_pics = []
+    for event in all_user_events:
+        profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
+        events_with_pics.append({
+            'id': event.id, 'title': event.title, 'source': event.source,
+            'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
+            'social_account_id': event.social_account_id,
+            'profile_pic_url': profile_pic_url
+        })
+
+    context.update({
+        "view_mode": "day",
+        "events": events_with_pics,
+        "header_title": current_date.strftime("%A, %B %d, %Y"),
+        "prev_url": reverse('calendar_day', kwargs={'year': prev_date.year, 'month': prev_date.month, 'day': prev_date.day}),
+        "next_url": reverse('calendar_day', kwargs={'year': next_date.year, 'month': next_date.month, 'day': next_date.day}),
+    })
+    return render(request, 'scheduler_app/calendar.html', context)
+
+
+# @login_required
+# def calendar_view(request, year, month):
+#     year, month = int(year), int(month)
+#     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
+#     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
+    
+#     all_user_events = Event.objects.filter(user=request.user, date__year=year, date__month=month).select_related('social_account').order_by('start_time')
+    
+#     num_days_in_month = cal.monthrange(year, month)[1]
+#     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
+    
+#     for event in all_user_events:
+#         day_of_event = event.date.day
+#         if day_of_event in events_by_day:
+#             profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
+#             events_by_day[day_of_event].append({
+#                 'id': event.id, 'title': event.title, 'source': event.source,
+#                 'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
+#                 'social_account_id': event.social_account_id, 'profile_pic_url': profile_pic_url
+#             })
+
+#     first_weekday, num_days = cal.monthrange(year, month)
+#     start_day_of_week = (first_weekday + 1) % 7
+#     days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
+#     for day in range(1, num_days + 1):
+#         days_data.append({'day': day, 'events': events_by_day.get(day, []), 'is_placeholder': False})
+
+#     all_social_accounts = SocialAccount.objects.filter(user=request.user)
+#     google_accounts_list = [{'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')} for acc in all_social_accounts.filter(provider='google')]
+    
+#     microsoft_accounts_list = []
+#     microsoft_accounts = all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient']).prefetch_related('socialtoken_set')
+#     for acc in microsoft_accounts:
+#         token = acc.socialtoken_set.first()
+#         microsoft_accounts_list.append({
+#             'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)'),
+#             'avatar_url': get_microsoft_avatar(token) if token else None
+#         })
+    
+#     sharing_url = request.build_absolute_uri(reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid}))
+        
+#     context = {
+#         'year': year, 'month': month, 'month_name': cal.month_name[month],
+#         'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month,
+#         'next_year': next_year, 'next_month': next_month,
+#         'google_accounts': google_accounts_list, 'microsoft_accounts': microsoft_accounts_list,
+#         'sharing_url': sharing_url
+#     }
+#     return render(request, 'scheduler_app/calendar.html', context)
 
 
 @login_required
@@ -114,13 +264,13 @@ def disconnect_social_account(request, account_id):
     except Exception as e:
         messages.error(request, f"An error occurred: {e}")
     today = timezone.now()
-    return redirect('calendar', year=today.year, month=today.month)
+    return redirect('calendar_month', year=today.year, month=today.month)
 
 
 @login_required
 def redirect_after_login(request):
     today = timezone.now()
-    return redirect('calendar', year=today.year, month=today.month)
+    return redirect('calendar_month', year=today.year, month=today.month)
 
 
 @login_required
@@ -129,7 +279,7 @@ def add_event(request):
         form = EventForm(request.POST)
         if form.is_valid():
             event = form.save(commit=False); event.user = request.user; event.source = 'local'; event.save()
-            return redirect('calendar', year=event.date.year, month=event.date.month)
+            return redirect('calendar_month', year=event.date.year, month=event.date.month)
     else:
         form = EventForm(initial={'date': timezone.now().date()})
     today = timezone.now()
@@ -224,7 +374,7 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
             if credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request()); token.token = credentials.token; token.save()
 
-            service = build('calendar', 'v3', credentials=credentials)
+            service = build('calendar_month', 'v3', credentials=credentials)
             
             attendees = [
                 {'email': owner.email, 'organizer': True, 'responseStatus': 'accepted'},
@@ -348,7 +498,7 @@ def google_webhook_receiver(request):
             token.token = credentials.token
             token.save()
         
-        service = build('calendar', 'v3', credentials=credentials)
+        service = build('calendar_month', 'v3', credentials=credentials)
         events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
         events_data = events_result.get('items', [])
         api_event_ids = {e['id'] for e in events_data if e.get('id')}

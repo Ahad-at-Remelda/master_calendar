@@ -55,8 +55,8 @@
 </head>
 <body>
 
-<div class="page-wrapper">
-    <div class="sidebar bg-white p-3 border-end">
+    <div class="page-wrapper">
+         <div class="sidebar bg-white p-3 border-end">
         <h4 class="mb-4">Master Calendar</h4>
         <div class="mb-2">Logged in as: <strong>{{ user.username }}</strong></div>
         <hr>
@@ -101,7 +101,6 @@
         
         <h5>Booking & Sharing</h5>
         <div class="d-grid gap-2 mb-3">
-            <!-- THIS IS THE NEW SETTINGS BUTTON -->
             <a class="btn btn-outline-dark" href="{% url 'user_settings' %}"><i class="bi bi-gear-fill"></i> Booking Settings</a>
         </div>
         {% if sharing_url %}
@@ -125,169 +124,230 @@
     </div>
 
     <div class="main-content bg-light p-4">
+        <!-- =============================================== -->
+        <!-- == NEW HEADER WITH VIEW TOGGLE               == -->
+        <!-- =============================================== -->
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <a class="btn btn-outline-primary" href="{% url 'calendar' year=prev_year month=prev_month %}"><i class="bi bi-arrow-left"></i> Previous</a>
-            <h1 class="mb-0 h3">{{ month_name }} {{ year }}</h1>
-            <a class="btn btn-outline-primary" href="{% url 'calendar' year=next_year month=next_month %}">Next <i class="bi bi-arrow-right"></i></a>
+            <div class="btn-group">
+                <a href="{{ prev_url }}" class="btn btn-outline-primary"><i class="bi bi-arrow-left"></i> Prev</a>
+                <a href="{{ next_url }}" class="btn btn-outline-primary">Next <i class="bi bi-arrow-right"></i></a>
+            </div>
+            
+            <h1 class="mb-0 h3 text-center">{{ header_title }}</h1>
+
+            <div class="btn-group">
+                <a href="{{ today_day_url }}" class="btn btn-outline-secondary {% if view_mode == 'day' %}active{% endif %}">Day</a>
+                <a href="{{ today_week_url }}" class="btn btn-outline-secondary {% if view_mode == 'week' %}active{% endif %}">Week</a>
+                <a href="{{ today_month_url }}" class="btn btn-outline-secondary {% if view_mode == 'month' %}active{% endif %}">Month</a>
+            </div>
         </div>
-        <div class="calendar-grid mb-3">
-            <div class="day-name">Sun</div><div class="day-name">Mon</div><div class="day-name">Tue</div><div class="day-name">Wed</div><div class="day-name">Thu</div><div class="day-name">Fri</div><div class="day-name">Sat</div>
-        </div>
-        <div class="calendar-grid">
-            {% for data in days_data %}
-                <div class="{% if data.is_placeholder %}placeholder-day{% else %}calendar-day{% endif %}">
-                    {% if not data.is_placeholder %}
-                        <div class="calendar-day-header">{{ data.day }}</div>
+
+        <!-- =============================================== -->
+        <!-- == MONTH VIEW                                == -->
+        <!-- =============================================== -->
+        {% if view_mode == 'month' %}
+            <div class="calendar-grid mb-3">
+                <div class="day-name">Sun</div><div class="day-name">Mon</div><div class="day-name">Tue</div><div class="day-name">Wed</div><div class="day-name">Thu</div><div class="day-name">Fri</div><div class="day-name">Sat</div>
+            </div>
+            <div class="calendar-grid">
+                {% for data in days_data %}
+                    <div class="{% if data.is_placeholder %}placeholder-day{% else %}calendar-day{% endif %}">
+                        {% if not data.is_placeholder %}
+                            <div class="calendar-day-header">{{ data.day }}</div>
+                            <div class="event-list">
+                                {% for event in data.events %}
+                                    <div class="event {{ event.source }}-event" 
+                                        data-event-id="{{ event.id }}"
+                                        data-event-source="{{ event.source }}"
+                                        data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                        <!-- Icon Logic -->
+                                        <span>{{ event.title }}</span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <!-- =============================================== -->
+        <!-- == WEEK VIEW                                 == -->
+        <!-- =============================================== -->
+        {% if view_mode == 'week' %}
+            <div class="calendar-grid">
+                {% for day in week_days %}
+                    <div class="day-name">{{ day.date|date:"D j" }}</div>
+                {% endfor %}
+            </div>
+            <div class="calendar-grid" style="min-height: 80vh;">
+                {% for day in week_days %}
+                    <div class="calendar-day">
                         <div class="event-list">
-                            {% for event in data.events %}
-                                <div class="event {{ event.source }}-event" 
-                                     data-event-id="{{ event.id }}"
-                                     data-event-source="{{ event.source }}"
-                                     data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
-                                    {% if event.profile_pic_url %}
-                                        <img src="{{ event.profile_pic_url }}" class="event-icon" alt="Avatar">
-                                    {% elif event.source == 'microsoft' %}
-                                        {% for acc in microsoft_accounts %}{% if acc.id == event.social_account_id and acc.avatar_url %}<img src="{{ acc.avatar_url }}" class="event-icon" alt="Avatar">{% endif %}{% endfor %}
-                                    {% elif event.source == 'local' %}
-                                        <i class="bi bi-person-circle event-icon" style="color: #fff; font-size: 16px;"></i>
-                                    {% else %}
-                                        <div class="event-icon"></div>
-                                    {% endif %}
+                            {% for event in day.events %}
+                                <div class="event {{ event.source }}-event"
+                                    data-event-id="{{ event.id }}"
+                                    data-event-source="{{ event.source }}"
+                                    data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                    <!-- Icon Logic -->
                                     <span>{{ event.title }}</span>
                                 </div>
                             {% endfor %}
                         </div>
-                    {% endif %}
-                </div>
-            {% endfor %}
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="modal-title">Event Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
             </div>
-            <div class="modal-body">
-                <p><strong>Description:</strong> <span id="modal-description"></span></p>
-                <p><strong>Starts:</strong> <span id="modal-start-time"></span></p>
-                <p><strong>Ends:</strong> <span id="modal-end-time"></span></p>
-                <p><strong>Location:</strong> <span id="modal-location"></span></p>
-                <p><strong>Meeting Link:</strong> <a href="#" id="modal-meeting-link" target="_blank">Join Meeting</a></p>
-                <p><small><strong>Source:</strong> <span id="modal-source"></span></small></p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const calendarContainer = document.querySelector('.main-content');
-    
-    // --- FILTERING LOGIC ---
-    const filterCheckboxes = document.querySelectorAll('.calendar-filter');
-    function updateEventVisibility() {
-        const visibleSources = [];
-        const visibleAccounts = [];
-        filterCheckboxes.forEach(checkbox => {
-            if (checkbox.checked) {
-                if (checkbox.dataset.filterType === 'source') {
-                    visibleSources.push(checkbox.dataset.filterValue);
-                } else if (checkbox.dataset.filterType === 'account') {
-                    visibleAccounts.push(checkbox.dataset.filterValue);
-                }
-            }
-        });
-        document.querySelectorAll('.event').forEach(eventEl => {
-            const eventSource = eventEl.dataset.eventSource;
-            const socialAccountId = eventEl.dataset.socialAccountId;
-            let isVisible = false;
-            if (eventSource === 'local' && visibleSources.includes('local')) {
-                isVisible = true;
-            } else if (visibleAccounts.includes(socialAccountId)) {
-                isVisible = true;
-            }
-            eventEl.style.display = isVisible ? 'flex' : 'none';
-        });
-    }
-    filterCheckboxes.forEach(checkbox => checkbox.addEventListener('change', updateEventVisibility));
-    
-    // --- MODAL, WEBSOCKET, AND COPY BUTTON LOGIC ---
-    function initializeAppFeatures() {
-        // MODAL LOGIC
-        const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
-        document.querySelectorAll('.event').forEach(eventEl => {
-            eventEl.addEventListener('click', function () {
-                const eventId = this.dataset.eventId;
-                if (!eventId) return;
-                fetch(`/api/event/${eventId}/`)
-                    .then(response => response.json())
-                    .then(data => {
-                        document.getElementById('modal-title').textContent = data.title;
-                        document.getElementById('modal-description').textContent = data.description || 'No description provided.';
-                        document.getElementById('modal-start-time').textContent = data.start_time;
-                        document.getElementById('modal-end-time').textContent = data.end_time || 'N/A';
-                        document.getElementById('modal-location').textContent = data.location || 'N/A';
-                        const meetingLinkEl = document.getElementById('modal-meeting-link');
-                        if (data.meeting_link) {
-                            meetingLinkEl.href = data.meeting_link;
-                            meetingLinkEl.parentElement.style.display = 'block';
-                        } else {
-                            meetingLinkEl.parentElement.style.display = 'none';
-                        }
-                        document.getElementById('modal-source').textContent = `${data.source} (${data.account_email || 'Local'})`;
-                        eventDetailModal.show();
-                    });
-            });
-        });
-
-        // WEBSOCKET LOGIC
-        {% if user.is_authenticated %}
-            const userSocket = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/");
-            userSocket.onmessage = function (e) {
-                const data = JSON.parse(e.data);
-                if (data.update === "calendar_changed") {
-                    console.log("Real-time update received! Fetching new calendar content...");
-                    fetch(window.location.href)
-                        .then(response => response.text())
-                        .then(html => {
-                            const parser = new DOMParser();
-                            const doc = parser.parseFromString(html, 'text/html');
-                            const newMainContent = doc.querySelector('.main-content');
-                            if (newMainContent) {
-                                calendarContainer.innerHTML = newMainContent.innerHTML;
-                                initializeAppFeatures();
-                                updateEventVisibility();
-                            }
-                        });
-                }
-            };
-            userSocket.onclose = function (e) { console.error("WebSocket closed unexpectedly."); };
         {% endif %}
 
-        // COPY BUTTON LOGIC
-        const copyBtn = document.getElementById('copy-url-btn');
-        if (copyBtn) {
-            copyBtn.addEventListener('click', function() {
-                const urlInput = document.getElementById('sharing-url-input');
-                urlInput.select();
-                urlInput.setSelectionRange(0, 99999); // For mobile devices
-                navigator.clipboard.writeText(urlInput.value);
-                this.innerHTML = '<i class="bi bi-check-lg"></i>';
-                setTimeout(() => { this.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 2000);
+        <!-- =============================================== -->
+        <!-- == DAY VIEW                                  == -->
+        <!-- =============================================== -->
+        {% if view_mode == 'day' %}
+            <div class="list-group">
+                {% for event in events %}
+                    <a href="#" class="list-group-item list-group-item-action event-item" data-event-id="{{ event.id }}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">{{ event.title }}</h5>
+                            <small>{{ event.start_time }}</small>
+                        </div>
+                        <p class="mb-1">
+                            <!-- Icon Logic Here -->
+                            <span class="badge rounded-pill text-bg-light">{{ event.source }}</span>
+                        </p>
+                    </a>
+                {% empty %}
+                    <div class="list-group-item">
+                        <p class="text-muted mb-0">No events scheduled for this day.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        </div>
+
+    <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modal-title">Event Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Description:</strong> <span id="modal-description"></span></p>
+                    <p><strong>Starts:</strong> <span id="modal-start-time"></span></p>
+                    <p><strong>Ends:</strong> <span id="modal-end-time"></span></p>
+                    <p><strong>Location:</strong> <span id="modal-location"></span></p>
+                    <p><strong>Meeting Link:</strong> <a href="#" id="modal-meeting-link" target="_blank">Join Meeting</a></p>
+                    <p><small><strong>Source:</strong> <span id="modal-source"></span></small></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const calendarContainer = document.querySelector('.main-content');
+        
+        // --- FILTERING LOGIC ---
+        const filterCheckboxes = document.querySelectorAll('.calendar-filter');
+        function updateEventVisibility() {
+            const visibleSources = [];
+            const visibleAccounts = [];
+            filterCheckboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    if (checkbox.dataset.filterType === 'source') {
+                        visibleSources.push(checkbox.dataset.filterValue);
+                    } else if (checkbox.dataset.filterType === 'account') {
+                        visibleAccounts.push(checkbox.dataset.filterValue);
+                    }
+                }
+            });
+            document.querySelectorAll('.event').forEach(eventEl => {
+                const eventSource = eventEl.dataset.eventSource;
+                const socialAccountId = eventEl.dataset.socialAccountId;
+                let isVisible = false;
+                if (eventSource === 'local' && visibleSources.includes('local')) {
+                    isVisible = true;
+                } else if (visibleAccounts.includes(socialAccountId)) {
+                    isVisible = true;
+                }
+                eventEl.style.display = isVisible ? 'flex' : 'none';
             });
         }
-    }
-    
-    // Run all initialization on page load
-    updateEventVisibility();
-    initializeAppFeatures();
-});
-</script>
+        filterCheckboxes.forEach(checkbox => checkbox.addEventListener('change', updateEventVisibility));
+        
+        // --- MODAL, WEBSOCKET, AND COPY BUTTON LOGIC ---
+        function initializeAppFeatures() {
+            // MODAL LOGIC
+            const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
+            document.querySelectorAll('.event').forEach(eventEl => {
+                eventEl.addEventListener('click', function () {
+                    const eventId = this.dataset.eventId;
+                    if (!eventId) return;
+                    fetch(`/api/event/${eventId}/`)
+                        .then(response => response.json())
+                        .then(data => {
+                            document.getElementById('modal-title').textContent = data.title;
+                            document.getElementById('modal-description').textContent = data.description || 'No description provided.';
+                            document.getElementById('modal-start-time').textContent = data.start_time;
+                            document.getElementById('modal-end-time').textContent = data.end_time || 'N/A';
+                            document.getElementById('modal-location').textContent = data.location || 'N/A';
+                            const meetingLinkEl = document.getElementById('modal-meeting-link');
+                            if (data.meeting_link) {
+                                meetingLinkEl.href = data.meeting_link;
+                                meetingLinkEl.parentElement.style.display = 'block';
+                            } else {
+                                meetingLinkEl.parentElement.style.display = 'none';
+                            }
+                            document.getElementById('modal-source').textContent = `${data.source} (${data.account_email || 'Local'})`;
+                            eventDetailModal.show();
+                        });
+                });
+            });
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+            // WEBSOCKET LOGIC
+            {% if user.is_authenticated %}
+                const userSocket = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/");
+                userSocket.onmessage = function (e) {
+                    const data = JSON.parse(e.data);
+                    if (data.update === "calendar_changed") {
+                        console.log("Real-time update received! Fetching new calendar content...");
+                        fetch(window.location.href)
+                            .then(response => response.text())
+                            .then(html => {
+                                const parser = new DOMParser();
+                                const doc = parser.parseFromString(html, 'text/html');
+                                const newMainContent = doc.querySelector('.main-content');
+                                if (newMainContent) {
+                                    calendarContainer.innerHTML = newMainContent.innerHTML;
+                                    initializeAppFeatures();
+                                    updateEventVisibility();
+                                }
+                            });
+                    }
+                };
+                userSocket.onclose = function (e) { console.error("WebSocket closed unexpectedly."); };
+            {% endif %}
+
+            // COPY BUTTON LOGIC
+            const copyBtn = document.getElementById('copy-url-btn');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', function() {
+                    const urlInput = document.getElementById('sharing-url-input');
+                    urlInput.select();
+                    urlInput.setSelectionRange(0, 99999); // For mobile devices
+                    navigator.clipboard.writeText(urlInput.value);
+                    this.innerHTML = '<i class="bi bi-check-lg"></i>';
+                    setTimeout(() => { this.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 2000);
+                });
+            }
+        }
+        
+        // Run all initialization on page load
+        updateEventVisibility();
+        initializeAppFeatures();
+    });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

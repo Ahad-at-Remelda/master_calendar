@@ -6,12 +6,15 @@ from datetime import date
 from django.shortcuts import redirect
 
 today = date.today()
-calendar_redirect_view = lambda request: redirect('calendar', year=today.year, month=today.month)
+calendar_redirect_view = lambda request: redirect('calendar_month', year=today.year, month=today.month)
 
 urlpatterns = [
     # --- CORE CALENDAR URLs ---
     path('', calendar_redirect_view, name='home'),
-    path('calendar/<int:year>/<int:month>/', views.calendar_view, name='calendar'),
+    #path('calendar/<int:year>/<int:month>/', views.calendar_view, name='calendar'),
+    path('calendar/month/<int:year>/<int:month>/', views.calendar_view_month, name='calendar_month'),
+    path('calendar/week/<int:year>/<int:week>/', views.calendar_view_week, name='calendar_week'),
+    path('calendar/day/<int:year>/<int:month>/<int:day>/', views.calendar_view_day, name='calendar_day'),
     path('add/', views.add_event, name='add_event'),
     path('disconnect/<int:account_id>/', views.disconnect_social_account, name='disconnect_social_account'),
     path('redirect-after-login/', views.redirect_after_login, name='redirect_after_login'),

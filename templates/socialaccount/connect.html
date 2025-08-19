@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DEBUG CONNECT PAGE</title>
+</head>
+<body>
+
+    <h1 style="color: red; font-size: 48px;">THIS IS THE CUSTOM CONNECT TEMPLATE</h1>
+    <p>If you can see this red text, the file was found correctly.</p>
+
+    <hr>
+
+    <p>You are connecting the {{ provider.name }} account.</p>
+    <p>You are logged in as: {{ user.username }}</p>
+
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" style="font-size: 24px; padding: 20px;">Continue</button>
+    </form>
+
+</body>
+</html>
