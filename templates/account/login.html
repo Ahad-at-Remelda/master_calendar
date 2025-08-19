@@ -4,100 +4,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign In - Master Calendar</title>
+    <title>Sign In | Master Calendar</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
-            background: linear-gradient(135deg, #1f2937, #3b82f6);
-            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa, #c3cfe2); /* Lighter, professional gradient */
+            height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            margin: 0;
+            font-family: 'Poppins', sans-serif;
             padding: 1rem;
         }
-        .login-card {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(16px) saturate(180%);
-            -webkit-backdrop-filter: blur(16px) saturate(180%);
-            border-radius: 20px;
+        .auth-card {
+            background: #fff;
+            border-radius: 1.5rem;
             padding: 2.5rem;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            color: white;
             width: 100%;
             max-width: 420px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+            animation: fadeIn 0.6s ease-in-out;
+        }
+        .auth-card h2 {
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #333;
+        }
+        .form-floating {
+            margin-bottom: 1.2rem;
+        }
+        /* Custom styling for Django Allauth form fields */
+        #id_login, #id_password, #id_remember {
+            /* These styles will be applied by Bootstrap classes */
         }
         .form-control {
-            background: rgba(255,255,255,0.15); border: none; color: white; border-radius: 10px;
-        }
-        .form-control::placeholder {
-            color: rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            box-shadow: none;
+            transition: all 0.3s ease;
         }
         .form-control:focus {
-            background: rgba(255,255,255,0.25); outline: none; box-shadow: 0 0 0 2px #60a5fa; color: white;
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102,126,234,0.25);
         }
         .btn-custom {
-            background: linear-gradient(90deg, #3b82f6, #60a5fa); border: none; color: white;
-            font-weight: bold; border-radius: 12px; transition: transform 0.2s ease, box-shadow 0.2s ease;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: #fff;
+            border-radius: 12px;
+            padding: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
         }
         .btn-custom:hover {
-            transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59,130,246,0.4);
+            background: linear-gradient(90deg, #5a67d8, #6a3a8a);
+            transform: translateY(-2px);
+            color: #fff;
         }
-        a { color: #93c5fd; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .alert-danger {
-            background: rgba(239, 68, 68, 0.2) !important; 
-            border-color: rgba(239, 68, 68, 0.5) !important; 
-            color: white !important;
+        .auth-links {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.95rem;
+        }
+        .auth-links a {
+            text-decoration: none;
+            color: #667eea;
+            font-weight: 500;
+        }
+        .auth-links a:hover {
+            color: #764ba2;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
-
-    <div class="login-card">
-        <h2 class="text-center mb-4">🔑 Sign In to Master Calendar</h2>
+    <div class="auth-card">
+        <h2>Master Calendar</h2>
 
         {% if form.errors %}
-            <div class="alert alert-danger">
+            <div class="alert alert-danger p-2 text-center small">
                 Your username or password was incorrect. Please try again.
             </div>
         {% endif %}
 
-        <form method="post" action="{% url 'account_login' %}">
+        <form class="login" method="POST" action="{% url 'account_login' %}">
             {% csrf_token %}
-            <div class="mb-3">
-                <label for="id_login" class="form-label">Username or Email</label>
-                <input type="text" name="login" autofocus class="form-control form-control-lg" required id="id_login" placeholder="you@example.com">
+            
+            <!-- We manually render the fields to apply Bootstrap classes -->
+            <div class="form-floating">
+                <input type="text" name="login" id="id_login" class="form-control" autofocus="autofocus" required placeholder="you@example.com">
+                <label for="id_login">Username or Email</label>
             </div>
-            <div class="mb-3">
-                <label for="id_password" class="form-label">Password</label>
-                <input type="password" name="password" class="form-control form-control-lg" required id="id_password" placeholder="••••••••">
+
+            <div class="form-floating">
+                <input type="password" name="password" id="id_password" class="form-control" required placeholder="••••••••">
+                <label for="id_password">Password</label>
             </div>
-            <div class="d-flex justify-content-between align-items-center mb-4">
+            
+            <div class="d-flex justify-content-between align-items-center mb-3">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="remember" id="id_remember">
                     <label class="form-check-label" for="id_remember">Remember Me</label>
                 </div>
-                <a href="{% url 'account_reset_password' %}">Forgot password?</a>
+                <a href="{% url 'account_reset_password' %}" class="small">Forgot Password?</a>
             </div>
+
             <div class="d-grid">
-                <button type="submit" class="btn btn-custom btn-lg">Sign In</button>
+                <button class="btn btn-custom w-100" type="submit">Sign In</button>
             </div>
         </form>
-        
-        <div class="text-center my-3 d-flex align-items-center">
-            <hr class="flex-grow-1" style="border-color: rgba(255,255,255,0.2);">
-            <span class="px-2 text-muted">OR</span>
-            <hr class="flex-grow-1" style="border-color: rgba(255,255,255,0.2);">
+
+        {% comment %} <div class="text-center my-3 d-flex align-items-center">
+            <hr class="flex-grow-1"><span class="px-2 text-muted small">OR</span><hr class="flex-grow-1">
         </div>
 
-        <div class="text-center mt-4">
-            <p>Don’t have an account? <a href="{% url 'account_signup' %}">Sign Up</a></p>
+        <div class="d-grid gap-2">
+            <a href="{% provider_login_url 'google' %}" class="btn btn-light border"><i class="bi bi-google me-2 text-danger"></i>Sign in with Google</a>
+            <a href="{% provider_login_url 'microsoft' %}" class="btn btn-light border"><i class="bi bi-microsoft me-2"></i>Sign in with Microsoft</a>
+        </div> {% endcomment %}
+
+        <div class="auth-links">
+            <p>Don’t have an account? <a href="{% url 'account_signup' %}">Sign up</a></p>
         </div>
     </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

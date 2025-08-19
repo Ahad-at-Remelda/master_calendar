@@ -1,0 +1,33 @@
+{% extends "scheduler_app/base_public.html" %}
+{% load i18n %}
+
+{% block title %}Connect Account - Master Calendar{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-center align-items-center" style="min-height: 100vh;">
+    <div class="card shadow-sm border-0 text-center" style="width: 100%; max-width: 500px;">
+        <div class="card-body p-4 p-md-5">
+
+            <h1 class="h3 fw-bold">Connect {{ provider.name }}</h1>
+            
+            <p class="text-muted my-4">
+                You are about to connect your {{ provider.name }} account to authorize Master Calendar.
+            </p>
+
+            {% if process == "connect" %}
+                <p class="lead">
+                    You are signed in as <strong>{{ user.username }}</strong>.
+                </p>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="d-grid">
+                    <button class="btn btn-primary" type="submit">Continue to {{ provider.name }}</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

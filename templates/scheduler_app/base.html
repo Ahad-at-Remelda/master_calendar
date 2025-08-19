@@ -28,37 +28,77 @@
         body {
             background-color: var(--bs-light);
             font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
         }
 
-        /* This is a wrapper to center the content on pages like login/signup */
-        .auth-wrapper {
+        .main-container {
             display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 1.5rem;
+            height: 100vh;
         }
 
-        .card {
-            border: none;
-            border-radius: 1rem;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        .sidebar {
+            width: 280px;
+            flex-shrink: 0;
+            background-color: #ffffff;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
         }
-        
-        h1, h2, h3, h4, h5, h6 {
+
+        .sidebar-header {
+            padding: 1.5rem;
             font-family: 'Clash Display', sans-serif;
+            font-size: 1.5rem;
             font-weight: 600;
+            color: var(--bs-dark);
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .sidebar-header a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .sidebar-menu {
+            padding: 1rem;
+            flex-grow: 1;
+        }
+
+        .sidebar-footer {
+            padding: 1rem;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .menu-heading {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--bs-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.5rem 0.75rem;
+        }
+
+        .content-wrapper {
+            flex-grow: 1;
+            overflow-y: auto;
         }
         
     </style>
     
     {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-light">
+<body>
 
-    {% block content %}
-        <!-- The content of the child template will go here -->
-    {% endblock content %}
+    <div class="main-container">
+        <!-- The sidebar will be defined in the calendar.html template -->
+        {% block sidebar %}
+        {% endblock sidebar %}
+
+        <!-- This is the main content block that all other pages will fill -->
+        <main class="content-wrapper p-4">
+            {% block content %}
+            {% endblock content %}
+        </main>
+    </div>
 
     <!-- Bootstrap JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

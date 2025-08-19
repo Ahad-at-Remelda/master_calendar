@@ -27,13 +27,14 @@ import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from ics import Calendar, Event as ICSEvent, Attendee
-from ics.attendee import Attendee
+
 
 
 logger = logging.getLogger(__name__)
 
 # --- CORE APPLICATION VIEWS ---
 
+    
 def get_microsoft_avatar(token: SocialToken):
     try:
         headers = {'Authorization': f'Bearer {token.token}'}

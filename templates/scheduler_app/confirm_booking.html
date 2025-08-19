@@ -3,43 +3,77 @@
 {% block title %}Confirm Your Booking{% endblock %}
 
 {% block content %}
-<div class="container my-4 my-md-5" style="max-width: 500px;">
-    <div class="card shadow-sm">
-        <div class="card-header bg-light">
-            <h4 class="mb-0">Confirm Your Booking</h4>
-        </div>
+<div class="d-flex justify-content-center align-items-center py-5" style="min-height: 100vh; background: linear-gradient(135deg, #f5f7fa, #c3cfe2);">
+    <div class="auth-card w-100" style="max-width: 500px;">
         <div class="card-body p-4">
+            <h3 class="text-center mb-4 fw-bold">Confirm Your Booking</h3>
+
+            <!-- Booking Info -->
             <ul class="list-group list-group-flush mb-4">
-                <li class="list-group-item ps-0"><i class="bi bi-person me-2"></i> With: <strong>{{ owner.username }}</strong></li>
-                <li class="list-group-item ps-0"><i class="bi bi-calendar-event me-2"></i> When: <strong>{{ start_time|date:"l, F j, Y" }}</strong></li>
-                <li class="list-group-item ps-0"><i class="bi bi-clock me-2"></i> Time: <strong>{{ start_time|date:"h:i A" }} - {{ end_time|date:"h:i A" }} (UTC)</strong></li>
+                <li class="list-group-item ps-0 border-0"><i class="bi bi-person me-2 text-primary"></i> With: <strong>{{ owner.username }}</strong></li>
+                <li class="list-group-item ps-0 border-0"><i class="bi bi-calendar-event me-2 text-primary"></i> When: <strong>{{ start_time|date:"l, F j, Y" }}</strong></li>
+                <li class="list-group-item ps-0 border-0"><i class="bi bi-clock me-2 text-primary"></i> Time: <strong>{{ start_time|date:"h:i A" }} - {{ end_time|date:"h:i A" }} (UTC)</strong></li>
             </ul>
             
+            <!-- Booking Form -->
             <form method="post">
                 {% csrf_token %}
-                <h5 class="mb-3">Enter Your Details</h5>
+                <h5 class="mb-3 fw-semibold">Enter Your Details</h5>
+
                 <div class="mb-3">
                     <label for="title" class="form-label">Meeting Title</label>
-                    <input type="text" class="form-control" id="title" name="title" required placeholder="e.g., Project Kick-off">
+                    <input type="text" class="form-control rounded-3" id="title" name="title" required placeholder="e.g., Project Kick-off">
                 </div>
+
                 <div class="mb-3">
                     <label for="name" class="form-label">Your Name</label>
-                    <input type="text" class="form-control" id="name" name="name" required placeholder="e.g., Jane Doe">
+                    <input type="text" class="form-control rounded-3" id="name" name="name" required placeholder="e.g., Jane Doe">
                 </div>
+
                 <div class="mb-3">
                     <label for="email" class="form-label">Your Email</label>
-                    <input type="email" class="form-control" id="email" name="email" required placeholder="e.g., jane.doe@example.com">
+                    <input type="email" class="form-control rounded-3" id="email" name="email" required placeholder="e.g., jane.doe@example.com">
                 </div>
+
                 <div class="mb-3">
                     <label for="guests" class="form-label">Additional Guests (optional)</label>
-                    <textarea class="form-control" id="guests" name="guests" rows="2" placeholder="guest1@example.com, guest2@example.com"></textarea>
+                    <textarea class="form-control rounded-3" id="guests" name="guests" rows="2" placeholder="guest1@example.com, guest2@example.com"></textarea>
                     <small class="form-text text-muted">Separate multiple emails with a comma.</small>
                 </div>
+
                 <div class="d-grid mt-4">
-                    <button type="submit" class="btn btn-primary">Schedule Event</button>
+                    <button type="submit" class="btn btn-custom text-white">Schedule Event</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
+
+<style>
+    .auth-card {
+        background: #fff;
+        border-radius: 1.5rem;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+        animation: fadeIn 0.6s ease-in-out;
+    }
+    .btn-custom {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 12px;
+        padding: 0.75rem;
+        font-weight: 600;
+        border: none;
+        transition: all 0.2s ease;
+    }
+    .btn-custom:hover {
+        background: linear-gradient(90deg, #5a67d8, #6a3a8a);
+        transform: translateY(-2px);
+    }
+    .form-control {
+        border-radius: 0.75rem !important;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
 {% endblock %}

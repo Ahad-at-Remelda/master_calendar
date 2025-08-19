@@ -3,32 +3,35 @@
 {% block title %}Settings - Master Calendar{% endblock %}
 
 {% block content %}
-<div class="container mt-4" style="max-width: 800px;">
-    <h2 class="mb-4">Settings</h2>
+<div class="d-flex justify-content-center align-items-center py-5" style="min-height: 100vh; background: linear-gradient(135deg, #f5f7fa, #c3cfe2);">
+    <div class="auth-card w-100" style="max-width: 800px;">
+        <div class="card-body p-4">
+            <h3 class="text-center mb-4 fw-bold">Settings</h3>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <!-- Messages -->
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-success alert-dismissible fade show rounded-3" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            <!-- Primary Booking Calendar -->
+            <div class="mb-4">
+                <h5 class="fw-semibold mb-3">Primary Booking Calendar</h5>
+                <p class="text-muted small">
+                    Select which calendar you want to use for creating new events when someone books a meeting with you.  
+                    This account will also send the official Google Calendar invitations.
+                </p>
             </div>
-        {% endfor %}
-    {% endif %}
 
-    <div class="card shadow-sm">
-        <div class="card-header">
-            <h5 class="mb-0">Primary Booking Calendar</h5>
-        </div>
-        <div class="card-body">
-            <p class="card-text text-muted">
-                Select which calendar you want to use for creating new events when someone books a meeting with you. This account will be used to send the official Google Calendar invitations.
-            </p>
-            
             <form method="post" action="{% url 'user_settings' %}">
                 {% csrf_token %}
-                <div class="list-group">
+                <div class="list-group rounded-3 shadow-sm">
                     {% for account in connected_accounts %}
-                        <label class="list-group-item d-flex gap-3">
+                        <label class="list-group-item d-flex align-items-center gap-3 border-0 border-bottom">
                             <input class="form-check-input flex-shrink-0" 
                                    type="radio" 
                                    name="primary_booking_calendar" 
@@ -36,30 +39,61 @@
                                    {% if profile.primary_booking_calendar.id == account.id %}checked{% endif %}>
                             <span>
                                 {% if account.provider == 'google' %}
-                                    <i class="bi bi-google text-success"></i>
+                                    <i class="bi bi-google text-success me-1"></i>
                                 {% else %}
-                                    <i class="bi bi-microsoft text-primary"></i>
+                                    <i class="bi bi-microsoft text-primary me-1"></i>
                                 {% endif %}
-                                <!-- THIS IS THE FIX: We now use the simple 'email' key -->
                                 {{ account.email }}
                                 {% if profile.primary_booking_calendar.id == account.id %}
-                                    <span class="badge bg-primary rounded-pill">Primary</span>
+                                    <span class="badge bg-gradient-primary rounded-pill">Primary</span>
                                 {% endif %}
                             </span>
                         </label>
                     {% empty %}
-                        <div class="alert alert-warning">
-                            You have no social accounts connected. Connect a Google or Outlook account to enable booking features.
+                        <div class="alert alert-warning rounded-3">
+                            You have no accounts connected. Connect Google or Outlook to enable booking features.
                         </div>
                     {% endfor %}
                 </div>
-                
-                <div class="mt-4">
-                    <button type="submit" class="btn btn-primary">Save Settings</button>
-                    <a href="{% url 'calendar' year=2025 month=8 %}" class="btn btn-secondary">Back to Calendar</a>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a href="{% url 'calendar' year=2025 month=8 %}" class="btn btn-outline-secondary rounded-3">← Back to Calendar</a>
+                    <button type="submit" class="btn btn-custom text-white">Save Settings</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
+
+<style>
+    .auth-card {
+        background: #fff;
+        border-radius: 1.5rem;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+        animation: fadeIn 0.6s ease-in-out;
+    }
+    .btn-custom {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 12px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        border: none;
+        transition: all 0.2s ease;
+    }
+    .btn-custom:hover {
+        background: linear-gradient(90deg, #5a67d8, #6a3a8a);
+        transform: translateY(-2px);
+    }
+    .list-group-item {
+        background: transparent;
+        padding: 1rem 1.25rem;
+    }
+    .badge.bg-gradient-primary {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
 {% endblock %}
