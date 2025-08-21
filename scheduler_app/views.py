@@ -29,6 +29,7 @@ from datetime import timedelta, date
 
 logger = logging.getLogger(__name__)
 
+# --- CORE APPLICATION VIEWS ---
 
     
 def get_microsoft_avatar(token: SocialToken):
@@ -91,30 +92,28 @@ def calendar_view_month(request, year, month):
     year, month = int(year), int(month)
     
     current_date = date(year, month, 1)
-    # Correctly navigate to the previous month's first day
     prev_month_date = (current_date - timedelta(days=1)).replace(day=1)
-    # Correctly navigate to the next month's first day
     next_month_date = (current_date + timedelta(days=32)).replace(day=1)
     
+    # <-- MAJOR FIX: Query by timezone-aware range instead of just date -->
+    local_tz = timezone.get_current_timezone()
+    first_day_of_month = local_tz.localize(datetime(year, month, 1))
+    last_day_of_month = (first_day_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
+
     all_user_events = Event.objects.filter(
         user=request.user, 
-        date__year=year, 
-        date__month=month
+        start_time__range=(first_day_of_month, last_day_of_month)
     ).select_related('social_account').order_by('start_time')
     
     num_days_in_month = cal.monthrange(year, month)[1]
     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
     
     for event in all_user_events:
-        day_of_event = event.date.day
+        # Convert event's start time to the local timezone to find the correct day
+        local_start_time = event.start_time.astimezone(local_tz)
+        day_of_event = local_start_time.day
         if day_of_event in events_by_day:
-            profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
-            events_by_day[day_of_event].append({
-                'id': event.id, 'title': event.title, 'source': event.source,
-                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
-                'social_account_id': event.social_account_id,
-                'profile_pic_url': profile_pic_url
-            })
+            events_by_day[day_of_event].append(event)
         
     first_weekday, num_days = cal.monthrange(year, month)
     start_day_of_week = (first_weekday + 1) % 7
@@ -136,33 +135,35 @@ def calendar_view_week(request, year, week):
     context = get_base_calendar_context(request)
     year, week = int(year), int(week)
     
-    start_of_week = date.fromisocalendar(year, week, 1) # Monday
-    end_of_week = start_of_week + timedelta(days=6) # Sunday
-    prev_week_date = start_of_week - timedelta(days=7)
-    next_week_date = start_of_week + timedelta(days=7)
+    start_of_week_date = date.fromisocalendar(year, week, 1) # Monday
+    end_of_week_date = start_of_week_date + timedelta(days=6) # Sunday
     
-    week_days = [start_of_week + timedelta(days=i) for i in range(7)]
+    # <-- MAJOR FIX: Query by timezone-aware range instead of just date -->
+    local_tz = timezone.get_current_timezone()
+    start_of_week = local_tz.localize(datetime.combine(start_of_week_date, time.min))
+    end_of_week = local_tz.localize(datetime.combine(end_of_week_date, time.max))
+    
+    prev_week_date = start_of_week_date - timedelta(days=7)
+    next_week_date = start_of_week_date + timedelta(days=7)
     
     all_user_events = Event.objects.filter(
         user=request.user, 
-        date__range=[start_of_week, end_of_week]
+        start_time__range=[start_of_week, end_of_week]
     ).select_related('social_account').order_by('start_time')
 
-    events_by_day = {d: [] for d in week_days}
+    week_days_dates = [start_of_week_date + timedelta(days=i) for i in range(7)]
+    events_by_day = {d: [] for d in week_days_dates}
+
     for event in all_user_events:
-        if event.date in events_by_day:
-            profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
-            events_by_day[event.date].append({
-                'id': event.id, 'title': event.title, 'source': event.source,
-                'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
-                'social_account_id': event.social_account_id,
-                'profile_pic_url': profile_pic_url
-            })
+        local_start_time = event.start_time.astimezone(local_tz)
+        event_date = local_start_time.date()
+        if event_date in events_by_day:
+            events_by_day[event_date].append(event)
         
     context.update({
         "view_mode": "week",
-        "header_title": f"{start_of_week.strftime('%b %d')} - {end_of_week.strftime('%b %d, %Y')}",
-        "week_days": [{'date': d, 'events': events_by_day.get(d, [])} for d in week_days],
+        "header_title": f"{start_of_week_date.strftime('%b %d')} - {end_of_week_date.strftime('%b %d, %Y')}",
+        "week_days": [{'date': d, 'events': events_by_day.get(d, [])} for d in week_days_dates],
         "prev_url": reverse('calendar_week', kwargs={'year': prev_week_date.isocalendar().year, 'week': prev_week_date.isocalendar().week}),
         "next_url": reverse('calendar_week', kwargs={'year': next_week_date.isocalendar().year, 'week': next_week_date.isocalendar().week}),
     })
@@ -176,22 +177,19 @@ def calendar_view_day(request, year, month, day):
     prev_date = current_date - timedelta(days=1)
     next_date = current_date + timedelta(days=1)
     
-    all_user_events = Event.objects.filter(user=request.user, date=current_date).select_related('social_account').order_by('start_time')
-    
-    # We add profile picture information here as well
-    events_with_pics = []
-    for event in all_user_events:
-        profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
-        events_with_pics.append({
-            'id': event.id, 'title': event.title, 'source': event.source,
-            'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
-            'social_account_id': event.social_account_id,
-            'profile_pic_url': profile_pic_url
-        })
+    # <-- MAJOR FIX: Query by timezone-aware range instead of just date -->
+    local_tz = timezone.get_current_timezone()
+    start_of_day = local_tz.localize(datetime.combine(current_date, time.min))
+    end_of_day = local_tz.localize(datetime.combine(current_date, time.max))
 
+    all_user_events = Event.objects.filter(
+        user=request.user, 
+        start_time__range=(start_of_day, end_of_day)
+    ).select_related('social_account').order_by('start_time')
+    
     context.update({
         "view_mode": "day",
-        "events": events_with_pics,
+        "events": all_user_events,
         "header_title": current_date.strftime("%A, %B %d, %Y"),
         "prev_url": reverse('calendar_day', kwargs={'year': prev_date.year, 'month': prev_date.month, 'day': prev_date.day}),
         "next_url": reverse('calendar_day', kwargs={'year': next_date.year, 'month': next_date.month, 'day': next_date.day}),
@@ -199,62 +197,10 @@ def calendar_view_day(request, year, month, day):
     return render(request, 'scheduler_app/calendar.html', context)
 
 
-# @login_required
-# def calendar_view(request, year, month):
-#     year, month = int(year), int(month)
-#     prev_month, prev_year = (month - 1, year) if month > 1 else (12, year - 1)
-#     next_month, next_year = (month + 1, year) if month < 12 else (1, year + 1)
-    
-#     all_user_events = Event.objects.filter(user=request.user, date__year=year, date__month=month).select_related('social_account').order_by('start_time')
-    
-#     num_days_in_month = cal.monthrange(year, month)[1]
-#     events_by_day = {day: [] for day in range(1, num_days_in_month + 1)}
-    
-#     for event in all_user_events:
-#         day_of_event = event.date.day
-#         if day_of_event in events_by_day:
-#             profile_pic_url = event.social_account.get_avatar_url() if event.social_account else None
-#             events_by_day[day_of_event].append({
-#                 'id': event.id, 'title': event.title, 'source': event.source,
-#                 'start_time': event.start_time.strftime('%I:%M %p') if event.start_time else 'All Day',
-#                 'social_account_id': event.social_account_id, 'profile_pic_url': profile_pic_url
-#             })
-
-#     first_weekday, num_days = cal.monthrange(year, month)
-#     start_day_of_week = (first_weekday + 1) % 7
-#     days_data = [{'is_placeholder': True} for _ in range(start_day_of_week)]
-#     for day in range(1, num_days + 1):
-#         days_data.append({'day': day, 'events': events_by_day.get(day, []), 'is_placeholder': False})
-
-#     all_social_accounts = SocialAccount.objects.filter(user=request.user)
-#     google_accounts_list = [{'id': acc.id, 'email': acc.extra_data.get('email', '(No Email)')} for acc in all_social_accounts.filter(provider='google')]
-    
-#     microsoft_accounts_list = []
-#     microsoft_accounts = all_social_accounts.filter(provider__in=['microsoft', 'MasterCalendarClient']).prefetch_related('socialtoken_set')
-#     for acc in microsoft_accounts:
-#         token = acc.socialtoken_set.first()
-#         microsoft_accounts_list.append({
-#             'id': acc.id, 'email': acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No Email)'),
-#             'avatar_url': get_microsoft_avatar(token) if token else None
-#         })
-    
-#     sharing_url = request.build_absolute_uri(reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid}))
-        
-#     context = {
-#         'year': year, 'month': month, 'month_name': cal.month_name[month],
-#         'days_data': days_data, 'prev_year': prev_year, 'prev_month': prev_month,
-#         'next_year': next_year, 'next_month': next_month,
-#         'google_accounts': google_accounts_list, 'microsoft_accounts': microsoft_accounts_list,
-#         'sharing_url': sharing_url
-#     }
-#     return render(request, 'scheduler_app/calendar.html', context)
-
-
 @login_required
 def disconnect_social_account(request, account_id):
     try:
         social_account = get_object_or_404(SocialAccount, id=account_id, user=request.user)
-        # If the account being disconnected is the primary booking calendar, clear the setting
         if request.user.profile.primary_booking_calendar == social_account:
             request.user.profile.primary_booking_calendar = None
             request.user.profile.save()
@@ -286,30 +232,15 @@ def add_event(request):
     return render(request, 'scheduler_app/add_event.html', {'form': form, 'year': today.year, 'month': today.month})
 
 
-
-
-
 def booking_view(request, sharing_uuid):
-    """
-    Public page for viewing available slots for a user.
-    """
     profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
     owner = profile.user
-    
-    # For now, we'll hardcode the meeting duration to 30 minutes.
-    # We can make this a setting in UserProfile later if needed.
     meeting_duration = 30
-    
-    # We will show availability for the next 14 days
     today = timezone.now().date()
     availability = {}
     for i in range(14):
         current_date = today + timedelta(days=i)
-        
-        # Get all existing events for the calendar owner on this day
         busy_times = Event.objects.filter(user=owner, date=current_date, start_time__isnull=False, end_time__isnull=False).values_list('start_time', 'end_time')
-        
-        # Generate potential slots (e.g., from 9am to 5pm)
         potential_slots = []
         slot_time = timezone.make_aware(datetime.combine(current_date, time(9, 0)))
         end_of_workday = slot_time.replace(hour=17)
@@ -318,13 +249,11 @@ def booking_view(request, sharing_uuid):
             potential_slots.append(slot_time)
             slot_time += timedelta(minutes=meeting_duration)
             
-        # Filter out slots that are busy
         available_slots = []
         for slot in potential_slots:
             is_free = True
             slot_end = slot + timedelta(minutes=meeting_duration)
             for busy_start, busy_end in busy_times:
-                # Check for any overlap
                 if busy_start < slot_end and busy_end > slot:
                     is_free = False
                     break
@@ -335,18 +264,12 @@ def booking_view(request, sharing_uuid):
             availability[current_date] = available_slots
 
     context = {
-        'owner': owner,
-        'availability': availability,
-        'sharing_uuid': sharing_uuid,
+        'owner': owner, 'availability': availability, 'sharing_uuid': sharing_uuid,
     }
     return render(request, 'scheduler_app/booking_page.html', context)
 
 
-
 def confirm_booking_view(request, sharing_uuid, datetime_iso):
-    """
-    Final version using the user's designated primary calendar.
-    """
     profile = get_object_or_404(UserProfile, sharing_uuid=sharing_uuid)
     owner = profile.user
     meeting_duration = 30
@@ -374,7 +297,7 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
             if credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request()); token.token = credentials.token; token.save()
 
-            service = build('calendar_month', 'v3', credentials=credentials)
+            service = build('calendar', 'v3', credentials=credentials)
             
             attendees = [
                 {'email': owner.email, 'organizer': True, 'responseStatus': 'accepted'},
@@ -400,8 +323,6 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
                 date=start_time.date(), start_time=start_time, end_time=end_time
             )
 
-            # (The owner notification email logic can be added here)
-
         except SocialAccount.DoesNotExist:
             return HttpResponse("Booking is unavailable: The calendar owner has not configured a primary calendar for bookings.", status=503)
         except Exception as e:
@@ -413,14 +334,8 @@ def confirm_booking_view(request, sharing_uuid, datetime_iso):
     return render(request, 'scheduler_app/confirm_booking.html', context)
 
 
-
-
 @login_required
 def user_settings_view(request):
-    """
-    This is the final, correct version. It prepares a clean list of accounts
-    for the template to use, preventing crashes.
-    """
     profile = request.user.profile
     if request.method == 'POST':
         primary_calendar_id = request.POST.get('primary_booking_calendar')
@@ -438,24 +353,17 @@ def user_settings_view(request):
             messages.info(request, "Primary booking calendar has been cleared.")
         return redirect('user_settings')
 
-    # === THIS IS THE CRITICAL FIX ===
-    # We build a clean list of dictionaries here, so the template is simple.
     all_accounts = SocialAccount.objects.filter(user=request.user)
     
     accounts_for_template = []
     for acc in all_accounts:
-        # Safely get the email regardless of the provider
         email = acc.extra_data.get('email') or acc.extra_data.get('mail') or acc.extra_data.get('userPrincipalName', '(No email found)')
         accounts_for_template.append({
-            'id': acc.id,
-            'provider': acc.provider,
-            'email': email,
+            'id': acc.id, 'provider': acc.provider, 'email': email,
         })
         
     context = {
-        # We pass the new, clean list to the template
-        'connected_accounts': accounts_for_template,
-        'profile': profile
+        'connected_accounts': accounts_for_template, 'profile': profile
     }
     return render(request, 'scheduler_app/settings.html', context)
 
@@ -464,16 +372,16 @@ def user_settings_view(request):
 def event_detail_api(request, event_id):
     event = get_object_or_404(Event, id=event_id, user=request.user)
     account_email = event.social_account.extra_data.get('email') or event.social_account.extra_data.get('mail') if event.social_account else None
+    
     data = {
         'id': event.id, 'title': event.title, 'description': event.description,
         'date': event.date.strftime('%Y-%m-%d'),
-        'start_time': event.start_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.start_time else "All-day",
-        'end_time': event.end_time.strftime('%A, %B %d, %Y at %I:%M %p') if event.end_time else "",
+        'start_time': event.start_time.isoformat() if event.start_time else None,
+        'end_time': event.end_time.isoformat() if event.end_time else None,
         'location': event.location, 'meeting_link': event.meeting_link,
         'source': event.source, 'account_email': account_email,
     }
     return JsonResponse(data)
-
 
 
 @csrf_exempt
@@ -498,7 +406,7 @@ def google_webhook_receiver(request):
             token.token = credentials.token
             token.save()
         
-        service = build('calendar_month', 'v3', credentials=credentials)
+        service = build('calendar', 'v3', credentials=credentials)
         events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
         events_data = events_result.get('items', [])
         api_event_ids = {e['id'] for e in events_data if e.get('id')}
@@ -512,34 +420,20 @@ def google_webhook_receiver(request):
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')) if event_data.get('end') else None
             
-            # THIS IS THE CRITICAL FIX:
-            # We use get_or_create to check if we already know about this event.
             obj, created = Event.objects.get_or_create(
-                social_account=social_acc,
-                event_id=event_id,
+                social_account=social_acc, event_id=event_id,
                 defaults={
-                    'user': user,
-                    'title': event_data.get('summary', 'No Title'),
-                    'description': event_data.get('description', ''),
-                    'date': start_time.date(),
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    # If we are creating it for the first time, its source is 'google'
-                    'source': 'google'
+                    'user': user, 'title': event_data.get('summary', 'No Title'),
+                    'description': event_data.get('description', ''), 'date': start_time.date(),
+                    'start_time': start_time, 'end_time': end_time, 'source': 'google'
                 }
             )
             
-            # If the event already existed (wasn't created), we just update its fields
-            # but we do NOT change its source. This preserves 'booked_meeting'.
             if not created:
-                obj.title = event_data.get('summary', 'No Title')
-                obj.description = event_data.get('description', '')
-                obj.date = start_time.date()
-                obj.start_time = start_time
-                obj.end_time = end_time
+                obj.title = event_data.get('summary', 'No Title'); obj.description = event_data.get('description', '')
+                obj.date = start_time.date(); obj.start_time = start_time; obj.end_time = end_time
                 obj.save()
 
-        # The delete query is correctly scoped to the specific social_account.
         Event.objects.filter(social_account=social_acc).exclude(event_id__in=api_event_ids).delete()
 
         channel_layer = get_channel_layer()
@@ -587,30 +481,20 @@ def outlook_webhook_receiver(request):
                     start_time = parser.parse(start_raw)
                     end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
                     
-                    # THIS IS THE CRITICAL FIX (same logic as Google):
                     obj, created = Event.objects.get_or_create(
-                        social_account=social_acc,
-                        event_id=event_id,
+                        social_account=social_acc, event_id=event_id,
                         defaults={
-                            'user': user,
-                            'title': event_data.get('subject', 'No Title'),
-                            'description': event_data.get('bodyPreview', ''),
-                            'date': start_time.date(),
-                            'start_time': start_time,
-                            'end_time': end_time,
-                            'source': 'microsoft'
+                            'user': user, 'title': event_data.get('subject', 'No Title'),
+                            'description': event_data.get('bodyPreview', ''), 'date': start_time.date(),
+                            'start_time': start_time, 'end_time': end_time, 'source': 'microsoft'
                         }
                     )
                     
                     if not created:
-                        obj.title = event_data.get('subject', 'No Title')
-                        obj.description = event_data.get('bodyPreview', '')
-                        obj.date = start_time.date()
-                        obj.start_time = start_time
-                        obj.end_time = end_time
+                        obj.title = event_data.get('subject', 'No Title'); obj.description = event_data.get('bodyPreview', '')
+                        obj.date = start_time.date(); obj.start_time = start_time; obj.end_time = end_time
                         obj.save()
                 
-                # The delete query is correctly scoped.
                 Event.objects.filter(social_account=social_acc).exclude(event_id__in=api_event_ids).delete()
 
                 channel_layer = get_channel_layer()
