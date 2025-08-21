@@ -9,10 +9,12 @@ cffi==1.17.1
 channels==4.3.0
 charset-normalizer==3.4.2
 constantly==23.10.4
+crispy-bootstrap5==2025.6
 cryptography==45.0.5
 daphne==4.2.1
 Django==5.2.4
 django-allauth==65.10.0
+django-crispy-forms==2.4
 djangorestframework==3.16.1
 google-api-core==2.25.1
 google-api-python-client==2.177.0
@@ -37,6 +39,7 @@ pyngrok==7.2.12
 pyOpenSSL==25.1.0
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
+pytz==2025.2
 PyYAML==6.0.2
 requests==2.32.4
 requests-oauthlib==2.0.0
