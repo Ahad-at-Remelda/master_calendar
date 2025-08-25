@@ -6,19 +6,20 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL= 'https://6601e00ab7c0.ngrok-free.app'
 
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '6601e00ab7c0.ngrok-free.app',
-]
-# --------------------------------
-CSRF_TRUSTED_ORIGINS = [
-    'https://6601e00ab7c0.ngrok-free.app',
-    'https://*.ngrok-free.app',
-]
+#NGROK_URL= 'https://6601e00ab7c0.ngrok-free.app'
+# ALLOWED_HOSTS = [
+#     'localhost',
+#     '127.0.0.1',
+#     '6601e00ab7c0.ngrok-free.app',
+# ]
+# # --------------------------------
+# CSRF_TRUSTED_ORIGINS = [
+#     'https://6601e00ab7c0.ngrok-free.app',
+#     'https://*.ngrok-free.app',
+# ]
+
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
@@ -78,16 +79,16 @@ ASGI_APPLICATION = 'master_calendar.asgi.application'
 CHANNEL_LAYERS = {
     'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer',},
 }
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'master_calendar_db',
-        'USER': 'master_user',
-        'PASSWORD': 'master_pass',
-        'HOST': 'localhost', 'PORT': '5432',
-    }
-}
+#change these settings according to your database
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'DB_NAME',
+#         'USER': 'User_name',
+#         'PASSWORD': 'User_password',
+#         'HOST': 'localhost', 'PORT': '5432',
+#     }
+# }
 
 AUTH_PASSWORD_VALIDATORS = [
     { 'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator', },
@@ -175,8 +176,6 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
 }
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-# DEFAULT_FROM_EMAIL = 'Master Calendar <noreply@mastercalendar.com>'
 
 
 # --- PRODUCTION EMAIL CONFIGURATION ---
