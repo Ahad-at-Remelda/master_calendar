@@ -7,7 +7,7 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-x=x9v&fd!cmw=tdu_po@a^fpb**$e!o1%7y-kipn^)6mlr$xh)'
 DEBUG = True
-NGROK_URL= 'https://c0e221d7bdac.ngrok-free.app'
+NGROK_URL= 'https://6601e00ab7c0.ngrok-free.app'
 
 # --- THIS IS THE CRITICAL FIX ---
 # Hostnames must NOT include 'http://' or 'https://'.
@@ -15,11 +15,11 @@ NGROK_URL= 'https://c0e221d7bdac.ngrok-free.app'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    'c0e221d7bdac.ngrok-free.app',
+    '6601e00ab7c0.ngrok-free.app',
 ]
 # --------------------------------
 CSRF_TRUSTED_ORIGINS = [
-    'https://c0e221d7bdac.ngrok-free.app',
+    'https://6601e00ab7c0.ngrok-free.app',
     'https://*.ngrok-free.app',
 ]
 
