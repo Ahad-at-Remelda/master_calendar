@@ -185,4 +185,4 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER='notifications@remelda.com'
 EMAIL_HOST_PASSWORD = 'c4gr?ewP1' 
-DEFAULT_FROM_EMAIL = f"Master Calendar <{EMAIL_HOST_USER}>"
+DEFAULT_FROM_EMAIL = f"LetsSync <{EMAIL_HOST_USER}>"

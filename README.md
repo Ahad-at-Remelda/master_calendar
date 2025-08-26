@@ -4,7 +4,9 @@ Steps:
 
 copy proto_settings -> create settings.py -> Commented part update 
 
-add ngrok url , crsf token and allowed hosts
+setup ngrok server 
+
+add: ngrok url , crsf token and allowed hosts
 
 add postgres db settings (create db add into)
 
