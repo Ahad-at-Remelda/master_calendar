@@ -8,7 +8,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Master Calendar</title>
-    <!-- [ Your head content and CSS styles remain the same ] -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+Pro:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -100,7 +99,6 @@
     <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar"><i class="bi bi-list"></i></button>
 
     <div class="page-wrapper" id="pageWrapper">
-        <!-- [ Sidebar HTML remains the same ] -->
         <div class="sidebar" id="sidebar">
             <div class="p-4">
                 <div class="d-flex justify-content-between align-items-center">
@@ -121,15 +119,25 @@
                 <h5>Booking & Sharing</h5>
                 <div class="d-grid gap-2 mb-3"><a class="btn btn-modern btn-outline-modern" href="{% url 'user_settings' %}"><i class="bi bi-gear-fill me-2"></i> Booking Settings</a></div>
                 {% if sharing_url %}<label for="sharing-url-input" class="form-label"><small>Your Public Booking Link:</small></label><div class="input-group mb-3"><input type="text" id="sharing-url-input" class="form-control form-control-sm" value="{{ sharing_url }}" readonly><button class="btn btn-outline-secondary" type="button" id="copy-url-btn" title="Copy to clipboard"><i class="bi bi-clipboard"></i></button></div>{% else %}<p class="text-muted small">An error occurred generating your sharing link.</p>{% endif %}
-                <div class="d-grid gap-2"><a class="btn btn-modern btn-secondary-modern" href="{% url 'add_event' %}"><i class="bi bi-plus-circle-fill me-2"></i> Add Local Event</a><form action="{% url 'account_logout' %}" method="post" class="d-grid">{% csrf_token %}<button type="submit" class="btn btn-modern btn-outline-modern"><i class="bi bi-box-arrow-right me-2"></i> Logout</button></form></div>
+                <div class="d-grid gap-2">
+                    <a class="btn btn-modern btn-secondary-modern" href="{% url 'add_event' %}"><i class="bi bi-plus-circle-fill me-2"></i> Add Local Event</a>
+                    <a href="{% url 'home' %}" class="list-group-item list-group-item-action"><i class="bi bi-calendar3 me-2"></i> Main Calendar</a>
+                    <a href="{% url 'sync_calendars' %}" class="list-group-item list-group-item-action"><i class="bi bi-arrow-repeat me-2"></i> Sync Calendars</a>
+                    <form action="{% url 'account_logout' %}" method="post" class="d-grid">{% csrf_token %}<button type="submit" class="btn btn-modern btn-outline-modern"><i class="bi bi-box-arrow-right me-2"></i> Logout</button></form>
+                </div>
             </div>
         </div>
         
         <div class="main-content"
              data-current-year="{{ year }}" 
              data-current-month="{{ month }}">
-            <!-- [ The rest of your HTML template (header, all three calendar views) remains exactly the same ] -->
-            <div class="calendar-header"><div class="d-flex justify-content-between align-items-center"><div class="btn-group"><a href="{{ prev_url }}" class="btn btn-nav"><i class="bi bi-arrow-left me-2"></i> Previous</a><a href="{{ next_url }}" class="btn btn-nav">Next <i class="bi bi-arrow-right ms-2"></i></a></div><h1 class="mb-0">{{ header_title }}</h1><div class="btn-group"><a href="{{ today_day_url }}" class="btn btn-modern {% if view_mode == 'day' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Day</a><a href="{{ today_week_url }}" class="btn btn-modern {% if view_mode == 'week' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Week</a><a href="{{ today_month_url }}" class="btn btn-modern {% if view_mode == 'month' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Month</a></div></div></div>
+            <div class="calendar-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="btn-group"><a href="{{ prev_url }}" class="btn btn-nav"><i class="bi bi-arrow-left me-2"></i> Previous</a><a href="{{ next_url }}" class="btn btn-nav">Next <i class="bi bi-arrow-right ms-2"></i></a></div>
+                    <h1 class="mb-0">{{ header_title }}</h1>
+                    <div class="btn-group"><a href="{{ today_day_url }}" class="btn btn-modern {% if view_mode == 'day' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Day</a><a href="{{ today_week_url }}" class="btn btn-modern {% if view_mode == 'week' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Week</a><a href="{{ today_month_url }}" class="btn btn-modern {% if view_mode == 'month' %}btn-primary-modern{% else %}btn-outline-modern{% endif %}">Month</a></div>
+                </div>
+            </div>
             
             {% if view_mode == 'month' %}
                 <div class="calendar-grid mb-4"><div class="day-name">Sun</div><div class="day-name">Mon</div><div class="day-name">Tue</div><div class="day-name">Wed</div><div class="day-name">Thu</div><div class="day-name">Fri</div><div class="day-name">Sat</div></div>
@@ -143,7 +151,7 @@
                                         <div class="event {{ event.source }}-event" 
                                              data-event-id="{{ event.id }}"
                                              data-event-source="{{ event.source }}"
-                                             data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                             data-social-account-id="{{ event.social_account.id|default_if_none:'local' }}">
                                             <div class="event-time">{% if event.start_time %}{{ event.start_time|localtime|date:"g:i A" }}{% else %}All Day{% endif %}</div>
                                             <div class="event-title">{{ event.title|default:"Untitled Event" }}</div>
                                             <div class="event-icon"></div>
@@ -172,7 +180,7 @@
                                                     <div class="time-slot-event {{ event.source }}-event" 
                                                          data-event-id="{{ event.id }}"
                                                          data-event-source="{{ event.source }}"
-                                                         data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}"
+                                                         data-social-account-id="{{ event.social_account.id|default_if_none:'local' }}"
                                                          title="{{ event.title|default:'Untitled Event' }} - {{ event.start_time|localtime|date:'g:i A' }}">
                                                         <div style="font-size: 0.6rem; opacity: 0.9;">{{ event.start_time|localtime|date:"g:i A" }}</div>
                                                         <div style="font-size: 0.7rem;">{{ event.title|default:"Untitled"|truncatechars:12 }}</div>
@@ -183,7 +191,7 @@
                                             <div class="time-slot-event {{ event.source }}-event" 
                                                  data-event-id="{{ event.id }}"
                                                  data-event-source="{{ event.source }}"
-                                                 data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}"
+                                                 data-social-account-id="{{ event.social_account.id|default_if_none:'local' }}"
                                                  title="{{ event.title|default:'Untitled Event' }} - All Day">
                                                 <div style="font-size: 0.6rem; opacity: 0.9;">All Day</div>
                                                 <div style="font-size: 0.7rem;">{{ event.title|default:"Untitled"|truncatechars:12 }}</div>
@@ -210,7 +218,7 @@
                                                 <div class="event {{ event.source }}-event" 
                                                      data-event-id="{{ event.id }}"
                                                      data-event-source="{{ event.source }}"
-                                                     data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                                     data-social-account-id="{{ event.social_account.id|default_if_none:'local' }}">
                                                     <div class="event-time">{{ event.start_time|localtime|date:"g:i A" }}</div>
                                                     <div class="event-title">{{ event.title|default:"Untitled Event" }}</div><div class="event-icon"></div>
                                                 </div>
@@ -220,7 +228,7 @@
                                         <div class="event {{ event.source }}-event" 
                                              data-event-id="{{ event.id }}"
                                              data-event-source="{{ event.source }}"
-                                             data-social-account-id="{{ event.social_account_id|default_if_none:'local' }}">
+                                             data-social-account-id="{{ event.social_account.id|default_if_none:'local' }}">
                                             <div class="event-time">All Day</div>
                                             <div class="event-title">{{ event.title|default:"Untitled Event" }}</div><div class="event-icon"></div>
                                         </div>
@@ -234,7 +242,32 @@
         </div>
     </div>
 
-    <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="modal-title">Event Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body" id="modal-body-content"></div></div></div></div>
+    <!-- Main Modal for Single Event Details -->
+    <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modal-title">Event Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="modal-body-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Modal for showing all events for a day -->
+    <div class="modal fade" id="dayEventsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="day-events-modal-title">All Events</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="day-events-modal-body"></div>
+            </div>
+        </div>
+    </div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -245,92 +278,103 @@
         const sidebarToggle = document.getElementById('sidebarToggle');
         const sidebarClose = document.getElementById('sidebarClose');
 
-        function toggleSidebar() { /* Sidebar toggle logic */ }
+        function toggleSidebar() {
+            sidebar.classList.toggle('collapsed');
+            pageWrapper.classList.toggle('sidebar-collapsed');
+            sidebarToggle.classList.toggle('sidebar-open');
+            const icon = sidebarToggle.querySelector('i');
+            icon.className = sidebar.classList.contains('collapsed') ? 'bi bi-list' : 'bi bi-x';
+        }
         if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
         if (sidebarClose) sidebarClose.addEventListener('click', toggleSidebar);
 
-        // --- CORE APPLICATION LOGIC ---
-        
-        // This single function will handle all interactions.
-        // It's called once on page load, and again after any WebSocket update.
         function setupCalendarInteractions() {
-            console.log("Setting up calendar interactions...");
-
             const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
+            const dayEventsModal = new bootstrap.Modal(document.getElementById('dayEventsModal'));
 
-            // 1. Handle clicking on individual events to show the modal
-            document.querySelectorAll('.event, .time-slot-event').forEach(eventEl => {
-                eventEl.addEventListener('click', function () {
-                    const eventId = this.dataset.eventId;
-                    console.log(`Event clicked! ID: ${eventId}`);
-                    if (!eventId) return;
-
-                    fetch(`/api/event/${eventId}/`)
-                        .then(response => response.json())
-                        .then(data => {
-                            const formatDateTime = (iso) => iso ? new Date(iso).toLocaleString() : "All-day";
-                            
-                            let html = `
-                                <p><strong>Description:</strong> ${data.description || 'N/A'}</p>
-                                <p><strong>Starts:</strong> ${formatDateTime(data.start_time)}</p>
-                                <p><strong>Ends:</strong> ${formatDateTime(data.end_time)}</p>
-                                <p><strong>Location:</strong> ${data.location || 'N/A'}</p>
-                                ${data.meeting_link ? `<p><strong>Meeting Link:</strong> <a href="${data.meeting_link}" target="_blank">Join Meeting</a></p>` : ''}
-                                <p><small><strong>Source:</strong> ${data.source} (${data.account_email || 'Local'})</small></p>
-                            `;
-
-                            document.getElementById('modal-title').textContent = data.title || "Event Details";
-                            document.getElementById('modal-body-content').innerHTML = html;
-                            eventDetailModal.show();
-                        })
-                        .catch(err => console.error("Failed to fetch event details:", err));
-                });
-            });
-
-            // 2. Handle the "More Events" logic in the Month View
-            document.querySelectorAll('.calendar-day').forEach(dayEl => {
-                const eventList = dayEl.querySelector('.event-list');
-                if (!eventList) return;
-
-                const allEvents = eventList.querySelectorAll('.event');
-                const moreEventsButton = eventList.querySelector('.more-events');
-                const maxVisible = 2; // Show 2 events by default
-
-                if (allEvents.length > maxVisible) {
-                    // Hide all events beyond the max
-                    for (let i = maxVisible; i < allEvents.length; i++) {
-                        allEvents[i].style.display = 'none';
-                    }
-                    
-                    // Show and update the 'more' button
-                    if (moreEventsButton) {
-                        moreEventsButton.innerText = `${allEvents.length - maxVisible} more`;
-                        moreEventsButton.style.display = 'block';
-
-                        // Add click listener to the button
-                        moreEventsButton.addEventListener('click', function() {
-                            const dayNumber = dayEl.dataset.dayNumber;
-                            const year = calendarContainer.dataset.currentYear;
-                            const month = calendarContainer.dataset.currentMonth;
-                            console.log(`'More' button clicked for day ${dayNumber}`);
-
-                            if (year && month && dayNumber) {
-                                window.location.href = `/calendar/day/${year}/${month}/${dayNumber}/`;
-                            } else {
-                                console.error("Could not determine year/month for day view redirect.");
-                            }
-                        });
+            calendarContainer.addEventListener('click', function(e) {
+                const eventEl = e.target.closest('.event, .time-slot-event');
+                if (eventEl && eventEl.dataset.eventId) {
+                    showSingleEventModal(eventEl.dataset.eventId, eventDetailModal);
+                }
+                const moreEventsEl = e.target.closest('.more-events');
+                if (moreEventsEl) {
+                    const dayEl = moreEventsEl.closest('.calendar-day');
+                    if (dayEl) {
+                        showAllDayEventsModal(dayEl, dayEventsModal);
                     }
                 }
             });
 
-            // 3. Handle filter logic
-            document.querySelectorAll('.calendar-filter').forEach(cb => cb.addEventListener('change', updateEventVisibility));
-            updateEventVisibility(); // Run once on setup
+            document.querySelectorAll('.calendar-day').forEach(dayEl => {
+                const eventList = dayEl.querySelector('.event-list');
+                if (!eventList) return;
+                const allEvents = eventList.querySelectorAll('.event');
+                const moreEventsButton = eventList.querySelector('.more-events');
+                const maxVisible = 2;
+                if (allEvents.length > maxVisible) {
+                    for (let i = maxVisible; i < allEvents.length; i++) {
+                        allEvents[i].style.display = 'none';
+                    }
+                    if (moreEventsButton) {
+                        moreEventsButton.innerText = `${allEvents.length - maxVisible} more`;
+                        moreEventsButton.style.display = 'block';
+                    }
+                }
+            });
+        }
+
+        function showSingleEventModal(eventId, modalInstance) {
+            fetch(`/api/event/${eventId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    const formatDateTime = (iso) => iso ? new Date(iso).toLocaleString() : "All-day";
+                    let html = `
+                        <p><strong>Description:</strong> ${data.description || 'N/A'}</p>
+                        <p><strong>Starts:</strong> ${formatDateTime(data.start_time)}</p>
+                        <p><strong>Ends:</strong> ${formatDateTime(data.end_time)}</p>
+                        <p><strong>Location:</strong> ${data.location || 'N/A'}</p>
+                        ${data.meeting_link ? `<p><strong>Meeting Link:</strong> <a href="${data.meeting_link}" target="_blank">Join Meeting</a></p>` : ''}
+                        <p><small><strong>Source:</strong> ${data.source} (${data.account_email || 'Local'})</small></p>
+                    `;
+                    document.getElementById('modal-title').textContent = data.title || "Event Details";
+                    document.getElementById('modal-body-content').innerHTML = html;
+                    modalInstance.show();
+                });
+        }
+
+        function showAllDayEventsModal(dayElement, dayModalInstance) {
+            const dayNumber = dayElement.dataset.dayNumber;
+            const year = calendarContainer.dataset.currentYear;
+            const monthName = new Date(year, calendarContainer.dataset.currentMonth - 1).toLocaleString('default', { month: 'long' });
+            
+            document.getElementById('day-events-modal-title').textContent = `Events for ${monthName} ${dayNumber}`;
+            const eventListContainer = document.getElementById('day-events-modal-body');
+            eventListContainer.innerHTML = '';
+            
+            const allEventsInDay = dayElement.querySelectorAll('.event-list .event');
+            const eventListGroup = document.createElement('div');
+            eventListGroup.className = 'list-group';
+
+            allEventsInDay.forEach(eventNode => {
+                const clonedEvent = eventNode.cloneNode(true);
+                clonedEvent.style.display = 'flex';
+                clonedEvent.classList.add('list-group-item', 'list-group-item-action');
+                clonedEvent.addEventListener('click', () => {
+                    const eventId = clonedEvent.dataset.eventId;
+                    dayModalInstance.hide();
+                    setTimeout(() => {
+                        const detailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
+                        showSingleEventModal(eventId, detailModal);
+                    }, 500);
+                });
+                eventListGroup.appendChild(clonedEvent);
+            });
+            eventListContainer.appendChild(eventListGroup);
+            dayModalInstance.show();
         }
 
         function updateEventVisibility() {
-            console.log("Updating event visibility based on filters...");
             const filterCheckboxes = document.querySelectorAll('.calendar-filter');
             const visibleSources = [];
             const visibleAccounts = [];
@@ -338,8 +382,11 @@
                 if (checkbox.checked) {
                     const filterType = checkbox.dataset.filterType;
                     const filterValue = checkbox.dataset.filterValue;
-                    if (filterType === 'source') visibleSources.push(filterValue);
-                    else if (filterType === 'account') visibleAccounts.push(filterValue);
+                    if (filterType === 'source') {
+                        visibleSources.push(filterValue);
+                    } else if (filterType === 'account') {
+                        visibleAccounts.push(filterValue);
+                    }
                 }
             });
 
@@ -347,34 +394,37 @@
                 const eventSource = eventEl.dataset.eventSource;
                 const socialAccountId = eventEl.dataset.socialAccountId;
                 
-                let isVisible = visibleSources.includes(eventSource) || visibleAccounts.includes(socialAccountId);
+                let isVisible = false;
+                if (eventSource === 'local' && visibleSources.includes('local')) {
+                    isVisible = true;
+                } else if (eventSource === 'booked_meeting' && visibleSources.includes('booked_meeting')) {
+                    isVisible = true;
+                } else if (visibleAccounts.includes(socialAccountId)) {
+                    isVisible = true;
+                }
                 eventEl.style.display = isVisible ? 'flex' : 'none';
             });
         }
         
-        // --- WebSocket Connection ---
         {% if user.is_authenticated %}
             const userSocket = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/calendar/");
             userSocket.onmessage = function (e) {
                 const data = JSON.parse(e.data);
                 if (data.update === "calendar_changed") {
-                    console.log("WebSocket: Real-time update received! Fetching new calendar content...");
+                    console.log("WebSocket: Real-time update received!");
                     fetch(window.location.href).then(response => response.text()).then(html => {
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(html, 'text/html');
                         const newMainContent = doc.querySelector('.main-content');
                         if (newMainContent) {
                             calendarContainer.innerHTML = newMainContent.innerHTML;
-                            // CRITICAL FIX: Re-run the interaction setup after replacing the HTML
                             setupCalendarInteractions();
                         }
                     });
                 }
             };
-            userSocket.onclose = function (e) { console.error("WebSocket closed unexpectedly."); };
         {% endif %}
         
-        // Initial setup on page load
         setupCalendarInteractions();
     });
     </script>

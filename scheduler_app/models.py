@@ -17,13 +17,11 @@ class Event(models.Model):
     location = models.CharField(max_length=255, blank=True, null=True)
     meeting_link = models.URLField(max_length=500, blank=True, null=True)
     
-    # --- THIS IS THE FIRST FIX ---
-    # We add a new, special source for events booked through our app.
     SOURCE_CHOICES = [
         ('google', 'Google'),
         ('microsoft', 'Microsoft'),
         ('local', 'Local'),
-        ('booked_meeting', 'Booked Meeting'), # New source
+        ('booked_meeting', 'Booked Meeting'),
     ]
     source = models.CharField(
         max_length=50,
@@ -34,6 +32,12 @@ class Event(models.Model):
     
     event_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     social_account = models.ForeignKey('socialaccount.SocialAccount', on_delete=models.CASCADE, null=True, blank=True)
+    calendar_provider_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="The ID of the calendar this event belongs to, from the provider's API."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -49,9 +53,6 @@ class Event(models.Model):
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     sharing_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    
-    # --- THIS IS THE SECOND FIX ---
-    # This field will store the user's chosen primary calendar for sending invitations.
     primary_booking_calendar = models.ForeignKey(
         SocialAccount,
         on_delete=models.SET_NULL,
@@ -82,3 +83,47 @@ class OutlookWebhookSubscription(models.Model):
     expiration_datetime = models.DateTimeField()
     def __str__(self): return f"Outlook Sub for {self.social_account}"
 
+class SyncedCalendar(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    social_account = models.ForeignKey(SocialAccount, on_delete=models.CASCADE)
+    calendar_id = models.CharField(max_length=255, help_text="The unique ID of the calendar from the provider (e.g., Google's calendarId)")
+    name = models.CharField(max_length=255, help_text="The display name of the calendar")
+    provider = models.CharField(max_length=30) # 'google' or 'microsoft'
+
+    # =======================================================================
+    # == FIX: ADDED THIS MISSING FIELD ======================================
+    # =======================================================================
+    is_primary = models.BooleanField(default=False)
+    # =======================================================================
+
+    class Meta:
+        unique_together = ('social_account', 'calendar_id')
+
+    def __str__(self):
+        return f"{self.name} ({self.provider} - {self.user.username})"
+
+class SyncRelationship(models.Model):
+    SYNC_TYPE_CHOICES = [
+        ('full_details', 'Full Details'),
+        ('private', 'Private Appointment (Busy/Free)'),
+    ]
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    source_calendar = models.ForeignKey(SyncedCalendar, related_name='source_relations', on_delete=models.CASCADE)
+    destination_calendar = models.ForeignKey(SyncedCalendar, related_name='dest_relations', on_delete=models.CASCADE)
+    sync_type = models.CharField(max_length=50, choices=SYNC_TYPE_CHOICES, default='full_details')
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"Sync from {self.source_calendar.name} to {self.destination_calendar.name} for {self.user.username}"
+
+class EventMapping(models.Model):
+    relationship = models.ForeignKey(SyncRelationship, on_delete=models.CASCADE)
+    source_event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    destination_event_id = models.CharField(max_length=255, db_index=True)
+    last_synced = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('relationship', 'source_event')
+
+    def __str__(self):
+        return f"Mapping event {self.source_event.id} to {self.destination_event_id}"

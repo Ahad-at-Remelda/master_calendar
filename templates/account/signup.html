@@ -12,30 +12,76 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
     <style>
-        body {
-            background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
-            height: 100vh; display: flex; justify-content: center; align-items: center;
-            font-family: 'Poppins', sans-serif; padding: 1rem;
-        }
-        .auth-card {
-            background: #fff; border-radius: 1.5rem; padding: 2.5rem; width: 100%;
-            max-width: 420px; box-shadow: 0 12px 30px rgba(0,0,0,0.1);
-            animation: fadeIn 0.6s ease-in-out;
-        }
-        .auth-card h2 { font-weight: 700; text-align: center; margin-bottom: 2rem; color: #333; }
-        .form-floating { margin-bottom: 1.2rem; }
-        .form-floating > .form-control { padding: 1rem 0.75rem; }
-        .form-floating > label { padding: 1rem 0.75rem; }
-        .form-control { border-radius: 12px; border: 1px solid #ddd; }
-        .form-control:focus { border-color: #667eea; box-shadow: 0 0 0 0.2rem rgba(102,126,234,0.25); }
-        .btn-custom {
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            color: #fff; border-radius: 12px; padding: 0.9rem; font-weight: 600; border: none;
-        }
-        .auth-links { text-align: center; margin-top: 1.5rem; font-size: 0.95rem; }
-        .auth-links a { text-decoration: none; color: #667eea; font-weight: 500; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
+    body { background: linear-gradient(135deg, #f5f7fa, #c3cfe2); height: 100vh; display: flex; justify-content: center; align-items: center; font-family: 'Poppins', sans-serif; padding: 1rem; }
+    .auth-card { background: #fff; border-radius: 1.5rem; padding: 2.5rem; width: 100%; max-width: 420px; box-shadow: 0 12px 30px rgba(0,0,0,0.1); animation: fadeIn 0.6s ease-in-out; }
+    .auth-card h2 { font-weight: 700; text-align: center; margin-bottom: 2rem; color: #333; }
+    .btn-custom { background: linear-gradient(90deg, #667eea, #764ba2); color: #fff; border-radius: 12px; padding: 0.9rem; font-weight: 600; border: none; }
+    .auth-links { text-align: center; margin-top: 1.5rem; font-size: 0.95rem; }
+    .auth-links a { text-decoration: none; color: #667eea; font-weight: 500; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ======================================================================= */
+    /* == FIX: Perfected CSS for the Django-rendered floating labels ======== */
+    /* ======================================================================= */
+    .form-floating { position: relative; margin-bottom: 1.2rem; }
+
+    .form-floating input[type="text"],
+    .form-floating input[type="email"],
+    .form-floating input[type="password"] {
+        width: 100%;
+        height: calc(3.5rem + 2px);
+        padding: 1rem 0.75rem;
+        border-radius: 12px;
+        border: 1px solid #ddd;
+        /* CHANGE 1: Make background transparent and add a z-index */
+        background-color: transparent;
+        z-index: 2;
+        position: relative;
+    }
+    .form-floating input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102,126,234,0.25);
+        outline: 0;
+    }
+
+    .form-floating label {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        padding: 1rem 0.75rem;
+        pointer-events: none;
+        border: 1px solid transparent;
+        transform-origin: 0 0;
+        transition: opacity .1s ease-in-out,transform .1s ease-in-out;
+        color: #6c757d;
+        /* CHANGE 2: Give the label a lower z-index */
+        z-index: 1;
+    }
+    
+    /* This is the "floating" effect */
+    .form-floating input:focus ~ label,
+    .form-floating input:not(:placeholder-shown) ~ label,
+    /* CHANGE 3: Add this to handle Django's auto-filled values */
+    .form-floating input:-webkit-autofill ~ label {
+        opacity: .65;
+        transform: scale(.85) translateY(-.5rem) translateX(.15rem);
+        background-color: #fff; /* Add a background to the label when it floats */
+        padding: 0 0.25rem; /* Give it a little horizontal space */
+        height: auto; /* Allow the height to shrink */
+        z-index: 3; /* Bring it to the front when it floats */
+    }
+
+    /* By default, Django's labels have a `placeholder` attribute which we don't want to see */
+    /* This makes the default placeholder text invisible */
+    input::placeholder {
+        color: transparent;
+    }
+
+    .is-invalid { border-color: #dc3545 !important; }
+    .invalid-feedback { display: block; font-size: .875em; color: #dc3545; }
+    /* ======================================================================= */
+</style>
 </head>
 <body>
     <div class="auth-card">
@@ -49,29 +95,20 @@
                     {% for error in form.non_field_errors %}{{ error }}{% endfor %}
                 </div>
             {% endif %}
-
-            <div class="form-floating mb-3">
-                <input type="email" name="email" id="id_email" class="form-control" required placeholder=" ">
-                <label for="id_email">Email</label>
-                {% if form.email.errors %}<div class="text-danger small mt-1 ps-2">{{ form.email.errors.as_text }}</div>{% endif %}
-            </div>
             
-            <div class="form-floating mb-3">
-                <input type="text" name="username" id="id_username" class="form-control" required placeholder=" ">
-                <label for="id_username">Username</label>
-                {% if form.username.errors %}<div class="text-danger small mt-1 ps-2">{{ form.username.errors.as_text }}</div>{% endif %}
-            </div>
+            <!-- This loop will now render the fields correctly styled by the CSS above -->
+            {% for field in form %}
+                <div class="form-floating">
+                    {{ field }}
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {% if field.errors %}
+                        <div class="invalid-feedback">
+                            {% for error in field.errors %}{{ error }}{% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
 
-            <div class="form-floating mb-3">
-                <input type="password" name="password" id="id_password1" class="form-control" required placeholder=" ">
-                <label for="id_password1">Password</label>
-            </div>
-
-            <div class="form-floating mb-3">
-                <input type="password" name="password2" id="id_password2" class="form-control" required placeholder=" ">
-                <label for="id_password2">Confirm Password</label>
-            </div>
-            
             <div class="d-grid">
                 <button class="btn btn-custom w-100" type="submit">Sign Up</button>
             </div>

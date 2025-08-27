@@ -9,7 +9,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from allauth.socialaccount.models import SocialAccount, SocialToken
-from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile
+from .models import Event, GoogleWebhookChannel, OutlookWebhookSubscription, UserProfile, SyncedCalendar, SyncRelationship, EventMapping
 from .forms import EventForm
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -24,14 +24,33 @@ import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from datetime import timedelta, date
-
-
+from .calendar_providers import discover_and_store_calendars 
 
 logger = logging.getLogger(__name__)
 
 # --- CORE APPLICATION VIEWS ---
 
-    
+
+def google_batch_callback(request_id, response, exception):
+    """Callback for Google batch requests. Populates a global list with results."""
+    global batch_errors, successful_mappings_to_create
+    if exception:
+        batch_errors.append(f"Request ID {request_id} failed: {exception}")
+    else:
+        # request_id is in the format "source_event_id:relationship_id"
+        source_event_id, relationship_id = request_id.split(':')
+        new_dest_id = response.get('id')
+        if new_dest_id:
+            successful_mappings_to_create.append(
+                EventMapping(
+                    relationship_id=relationship_id,
+                    source_event_id=source_event_id,
+                    destination_event_id=new_dest_id
+                )
+            )
+            
+            
+                
 def get_microsoft_avatar(token: SocialToken):
     try:
         headers = {'Authorization': f'Bearer {token.token}'}
@@ -50,6 +69,15 @@ def get_base_calendar_context(request):
     A helper function to get common context data (like connected accounts and
     sharing URLs) that is needed by all calendar views.
     """
+    # =======================================================================
+    # == FIX: Proactively get or create the user profile to prevent errors ==
+    # =======================================================================
+    # This ensures that request.user.profile will always exist.
+    user_profile, created = UserProfile.objects.get_or_create(user=request.user)
+    if created:
+        logger.info(f"Created missing UserProfile for user: {request.user.username}")
+    # =======================================================================
+
     all_social_accounts = SocialAccount.objects.filter(user=request.user)
     
     google_accounts_list = [
@@ -67,8 +95,9 @@ def get_base_calendar_context(request):
             'avatar_url': get_microsoft_avatar(token) if token else None
         })
     
+    # Now this line is safe to run because we know user_profile exists.
     sharing_url = request.build_absolute_uri(
-        reverse('booking_view', kwargs={'sharing_uuid': request.user.profile.sharing_uuid})
+        reverse('booking_view', kwargs={'sharing_uuid': user_profile.sharing_uuid})
     )
     
     today = timezone.now()
@@ -407,11 +436,27 @@ def google_webhook_receiver(request):
             token.save()
         
         service = build('calendar', 'v3', credentials=credentials)
-        events_result = service.events().list(calendarId='primary', singleEvents=True).execute()
-        events_data = events_result.get('items', [])
-        api_event_ids = {e['id'] for e in events_data if e.get('id')}
+        
+        # --- MODIFICATION START: Fetch from all calendars, not just primary ---
+        # Get a list of calendars to check for events
+        calendar_list = service.calendarList().list().execute()
+        
+        all_events_data = []
+        for calendar_entry in calendar_list.get('items', []):
+            calendar_id = calendar_entry['id']
+            try:
+                events_result = service.events().list(calendarId=calendar_id, singleEvents=True).execute()
+                # Add the calendar_id to each event for later use
+                for event in events_result.get('items', []):
+                    event['calendar_provider_id'] = calendar_id 
+                    all_events_data.append(event)
+            except Exception as e:
+                logger.error(f"Could not fetch events from calendar {calendar_id} for user {user.username}: {e}")
+        # --- MODIFICATION END ---
+        
+        api_event_ids = {e['id'] for e in all_events_data if e.get('id')}
 
-        for event_data in events_data:
+        for event_data in all_events_data:
             event_id = event_data.get('id')
             start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
             if not event_id or not start_raw:
@@ -420,19 +465,27 @@ def google_webhook_receiver(request):
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')) if event_data.get('end') else None
             
-            obj, created = Event.objects.get_or_create(
-                social_account=social_acc, event_id=event_id,
-                defaults={
-                    'user': user, 'title': event_data.get('summary', 'No Title'),
-                    'description': event_data.get('description', ''), 'date': start_time.date(),
-                    'start_time': start_time, 'end_time': end_time, 'source': 'google'
-                }
+            # =======================================================================
+            # == STEP 2 CHANGE: ADDED `calendar_provider_id` TO THE DATABASE SAVE ===
+            # =======================================================================
+            defaults = {
+                'user': user,
+                'title': event_data.get('summary', 'No Title'),
+                'description': event_data.get('description', ''),
+                'date': start_time.date(),
+                'start_time': start_time,
+                'end_time': end_time,
+                'source': 'google',
+                'calendar_provider_id': event_data.get('calendar_provider_id') # Get the ID we added earlier
+            }
+
+            # Using update_or_create is safer than get_or_create + save
+            Event.objects.update_or_create(
+                social_account=social_acc,
+                event_id=event_id,
+                defaults=defaults
             )
-            
-            if not created:
-                obj.title = event_data.get('summary', 'No Title'); obj.description = event_data.get('description', '')
-                obj.date = start_time.date(); obj.start_time = start_time; obj.end_time = end_time
-                obj.save()
+            # =======================================================================
 
         Event.objects.filter(social_account=social_acc).exclude(event_id__in=api_event_ids).delete()
 
@@ -467,7 +520,11 @@ def outlook_webhook_receiver(request):
                 token = SocialToken.objects.get(account=social_acc)
                 
                 headers = {'Authorization': f'Bearer {token.token}'}
-                response = requests.get('https://graph.microsoft.com/v1.0/me/events', headers=headers)
+                # --- MODIFICATION: Use the $expand parameter to get the calendar ID with the event ---
+                events_endpoint = "https://graph.microsoft.com/v1.0/me/events?$expand=calendar"
+                response = requests.get(events_endpoint, headers=headers)
+                # --- END MODIFICATION ---
+
                 response.raise_for_status()
                 events_data = response.json().get('value', [])
                 api_event_ids = {e['id'] for e in events_data if e.get('id')}
@@ -481,19 +538,27 @@ def outlook_webhook_receiver(request):
                     start_time = parser.parse(start_raw)
                     end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else None
                     
-                    obj, created = Event.objects.get_or_create(
-                        social_account=social_acc, event_id=event_id,
-                        defaults={
-                            'user': user, 'title': event_data.get('subject', 'No Title'),
-                            'description': event_data.get('bodyPreview', ''), 'date': start_time.date(),
-                            'start_time': start_time, 'end_time': end_time, 'source': 'microsoft'
-                        }
-                    )
+                    # =======================================================================
+                    # == STEP 2 CHANGE: ADDED `calendar_provider_id` TO THE DATABASE SAVE ===
+                    # =======================================================================
+                    defaults = {
+                        'user': user,
+                        'title': event_data.get('subject', 'No Title'),
+                        'description': event_data.get('bodyPreview', ''),
+                        'date': start_time.date(),
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'source': 'microsoft',
+                        # The expanded calendar object contains the ID and name
+                        'calendar_provider_id': event_data.get('calendar', {}).get('id')
+                    }
                     
-                    if not created:
-                        obj.title = event_data.get('subject', 'No Title'); obj.description = event_data.get('bodyPreview', '')
-                        obj.date = start_time.date(); obj.start_time = start_time; obj.end_time = end_time
-                        obj.save()
+                    Event.objects.update_or_create(
+                        social_account=social_acc,
+                        event_id=event_id,
+                        defaults=defaults
+                    )
+                    # =======================================================================
                 
                 Event.objects.filter(social_account=social_acc).exclude(event_id__in=api_event_ids).delete()
 
@@ -510,3 +575,414 @@ def outlook_webhook_receiver(request):
         logger.error(f"Error decoding Outlook webhook body: {e}", exc_info=True)
     
     return HttpResponse(status=202)
+
+
+#only to save the batch errors responce so we can report them later
+batch_errors = []
+
+def batch_callback(request_id, response, exception):
+    """Callback function to handle responses from a batch request."""
+    if exception:
+        global batch_errors
+        batch_errors.append(f"Request ID {request_id} failed: {exception}")
+        logger.error(f"Batch Request ID {request_id} failed: {exception}")
+
+@login_required
+def sync_outlook_to_google(request):
+    """
+    Hardcoded view to sync all Outlook events to a new Google calendar,
+    using an EFFICIENT BATCH REQUEST for event creation.
+    """
+    user = request.user
+    today = timezone.now()
+
+    try:
+        outlook_account = SocialAccount.objects.get(user=user, provider__in=['microsoft', 'MasterCalendarClient'])
+        google_account = SocialAccount.objects.get(user=user, provider='google')
+    except SocialAccount.DoesNotExist:
+        messages.error(request, "You must have both an Outlook and a Google account connected.")
+        return redirect('calendar_month', year=today.year, month=today.month)
+
+    try:
+        events_from_outlook = Event.objects.filter(social_account=outlook_account)
+        if not events_from_outlook:
+             messages.warning(request, "No Outlook events found in the database to sync.")
+             return redirect('calendar_month', year=today.year, month=today.month)
+
+        google_token = SocialToken.objects.get(account=google_account)
+        credentials = Credentials(
+            token=google_token.token, refresh_token=google_token.token_secret,
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=google_token.app.client_id, client_secret=google_token.app.secret
+        )
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            google_token.token = credentials.token
+            google_token.save()
+        
+        service = build('calendar', 'v3', credentials=credentials)
+
+        # --- Create the new calendar (this is still a single operation) ---
+        calendar_name = f"Synced Outlook ({outlook_account.extra_data.get('mail', 'email')})"
+        new_calendar_body = {
+            'summary': calendar_name,
+            'description': f"Events synced from Outlook by LetsSync. Do not edit directly.",
+            'timeZone': 'UTC'
+        }
+        created_calendar = service.calendars().insert(body=new_calendar_body).execute()
+        destination_calendar_id = created_calendar['id']
+        
+        # --- BATCH PROCESSING LOGIC ---
+        global batch_errors
+        batch_errors.clear() # Clear errors from any previous runs
+        
+        # 1. Initialize the batch request object
+        batch = service.new_batch_http_request(callback=batch_callback)
+
+        # 2. Loop through events and ADD them to the batch (DO NOT EXECUTE)
+        for event in events_from_outlook:
+            event_body = {
+                'summary': event.title, 'description': event.description, 'location': event.location,
+                'start': {
+                    'dateTime': event.start_time.isoformat() if event.start_time else None,
+                    'date': event.date.isoformat() if not event.start_time else None,
+                    'timeZone': 'UTC',
+                },
+                'end': {
+                    'dateTime': event.end_time.isoformat() if event.end_time else None,
+                    'date': (event.date + timedelta(days=1)).isoformat() if not event.end_time and not event.start_time else event.date.isoformat(),
+                    'timeZone': 'UTC',
+                },
+            }
+            if not event.start_time:
+                del event_body['start']['dateTime']; del event_body['end']['dateTime']
+            else:
+                del event_body['start']['date']; del event_body['end']['date']
+
+            # Add the event insertion request to the batch queue
+            batch.add(service.events().insert(calendarId=destination_calendar_id, body=event_body))
+
+        # 3. Execute the entire batch in a single HTTP request
+        batch.execute()
+
+        # --- End of Batch Logic ---
+
+        if batch_errors:
+            # Report any errors that occurred during the batch process
+            error_message = "Sync completed with some errors: " + " | ".join(batch_errors)
+            messages.warning(request, error_message)
+        else:
+            messages.success(request, f"Successfully synced {len(events_from_outlook)} events to new calendar '{calendar_name}'!")
+
+    except Exception as e:
+        logger.error(f"Error during Outlook to Google sync for user {user.id}: {e}", exc_info=True)
+        messages.error(request, f"An unexpected error occurred during the sync: {e}")
+
+    return redirect('calendar_month', year=today.year, month=today.month)
+
+
+@login_required
+def sync_calendars_view(request):
+    """
+    Handles the display of the sync configuration page.
+    It discovers and displays all available calendars for the user.
+    """
+    discover_and_store_calendars(request.user)
+
+    all_user_calendars = SyncedCalendar.objects.filter(user=request.user).select_related('social_account')
+    active_syncs = SyncRelationship.objects.filter(user=request.user, is_active=True).select_related(
+        'source_calendar__social_account', 
+        'destination_calendar__social_account'
+    )
+
+    # =======================================================================
+    # == FIX: Prepare a clean list for the template to avoid errors ========
+    # =======================================================================
+    # We will create a list of dictionaries with a guaranteed 'display_email' key.
+    
+    calendars_for_template = []
+    for cal in all_user_calendars:
+        email = cal.social_account.extra_data.get('email') or cal.social_account.extra_data.get('mail') or '(No Email Found)'
+        calendars_for_template.append({
+            'id': cal.id,
+            'provider': cal.provider,
+            'name': cal.name,
+            'display_email': email
+        })
+
+    active_syncs_for_template = []
+    for sync in active_syncs:
+        source_email = sync.source_calendar.social_account.extra_data.get('email') or sync.source_calendar.social_account.extra_data.get('mail')
+        dest_email = sync.destination_calendar.social_account.extra_data.get('email') or sync.destination_calendar.social_account.extra_data.get('mail')
+        active_syncs_for_template.append({
+            'id': sync.id,
+            'source_provider': sync.source_calendar.provider,
+            'source_name': sync.source_calendar.name,
+            'source_email': source_email,
+            'dest_provider': sync.destination_calendar.provider,
+            'dest_name': sync.destination_calendar.name,
+            'dest_email': dest_email,
+            'sync_type_display': sync.get_sync_type_display()
+        })
+    # =======================================================================
+
+    context = get_base_calendar_context(request)
+    context.update({
+        'page_title': 'Sync Calendars',
+        'all_calendars': calendars_for_template, # Use the clean list
+        'active_syncs': active_syncs_for_template, # Use the clean list
+    })
+    
+    return render(request, 'scheduler_app/sync_calendars.html', context)
+
+
+
+@login_required
+def create_sync_relationship(request):
+    """
+    Handles the POST request from the sync_calendars.html form.
+    Creates the sync relationship and triggers the initial event sync.
+    """
+    if request.method != 'POST':
+        return redirect('sync_calendars')
+
+    user = request.user
+    source_cal_id = request.POST.get('source_calendar_id')
+    dest_cal_id = request.POST.get('destination_calendar_id')
+    sync_type = request.POST.get('sync_type')
+
+    # --- Validation ---
+    if not all([source_cal_id, dest_cal_id, sync_type]):
+        messages.error(request, "Invalid form submission.")
+        return redirect('sync_calendars')
+    
+    if source_cal_id == dest_cal_id:
+        messages.error(request, "Source and destination calendars cannot be the same.")
+        return redirect('sync_calendars')
+
+    try:
+        source_calendar = SyncedCalendar.objects.get(id=source_cal_id, user=user)
+        destination_calendar = SyncedCalendar.objects.get(id=dest_cal_id, user=user)
+    except SyncedCalendar.DoesNotExist:
+        messages.error(request, "One of the selected calendars could not be found.")
+        return redirect('sync_calendars')
+
+    relationship, created = SyncRelationship.objects.get_or_create(
+        user=user,
+        source_calendar=source_calendar,
+        destination_calendar=destination_calendar,
+        defaults={'sync_type': sync_type}
+    )
+
+    if not created:
+        messages.info(request, "A sync relationship between these calendars already exists.")
+        return redirect('sync_calendars')
+
+    # --- Trigger the Initial Sync ---
+    events_to_sync = Event.objects.filter(
+        social_account=source_calendar.social_account,
+        calendar_provider_id=source_calendar.calendar_id
+    )
+
+    if not events_to_sync:
+        messages.success(request, f"Sync relationship created for '{source_calendar.name}' to '{destination_calendar.name}'. No initial events to sync.")
+        return redirect('sync_calendars')
+
+    # Handle Google Destination
+    if destination_calendar.provider == 'google':
+        try:
+            google_token = SocialToken.objects.get(account=destination_calendar.social_account)
+            credentials = Credentials(
+                token=google_token.token, refresh_token=google_token.token_secret,
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=google_token.app.client_id, client_secret=google_token.app.secret
+            )
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                google_token.token = credentials.token; google_token.save()
+            
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # =======================================================================
+            # == STEP 5: UPGRADED BATCH LOGIC TO CREATE EVENT MAPPINGS =============
+            # =======================================================================
+            
+            # This list will store tuples of (source_event, new_destination_id)
+            successful_mappings = []
+
+            def batch_callback(request_id, response, exception):
+                if exception is None:
+                    # request_id is the index of the event in our original list
+                    source_event_index = int(request_id)
+                    source_event = events_to_sync[source_event_index]
+                    successful_mappings.append((source_event, response['id']))
+
+            batch = service.new_batch_http_request(callback=batch_callback)
+            
+            for i, event in enumerate(events_to_sync):
+                event_body = {
+                    'summary': event.title if sync_type == 'full_details' else 'Busy',
+                    'description': event.description if sync_type == 'full_details' else 'This time is booked by Sync App.',
+                    'location': event.location if sync_type == 'full_details' else '',
+                    'start': {'dateTime': event.start_time.isoformat(), 'timeZone': 'UTC'},
+                    'end': {'dateTime': event.end_time.isoformat(), 'timeZone': 'UTC'},
+                }
+                batch.add(
+                    service.events().insert(calendarId=destination_calendar.calendar_id, body=event_body),
+                    request_id=str(i) # Use the index as a unique ID for the callback
+                )
+            
+            batch.execute()
+
+            # Now, create the EventMapping records in bulk
+            mappings_to_create = [
+                EventMapping(
+                    relationship=relationship,
+                    source_event=source_event,
+                    destination_event_id=dest_id
+                )
+                for source_event, dest_id in successful_mappings
+            ]
+            EventMapping.objects.bulk_create(mappings_to_create)
+
+            messages.success(request, f"Successfully started sync and copied {len(successful_mappings)} events to '{destination_calendar.name}'.")
+
+        except Exception as e:
+            messages.error(request, f"Failed to sync events to Google: {e}")
+            relationship.delete() # Roll back
+            
+    # TODO: Add similar logic for Microsoft destinations
+    
+    return redirect('sync_calendars')
+
+
+@login_required
+def delete_sync_relationship(request, sync_id):
+    """
+    Finds a sync relationship and deletes all associated events from the
+    destination calendar before deleting the relationship itself.
+    """
+    if request.method != 'POST':
+        return redirect('sync_calendars')
+
+    try:
+        relationship = SyncRelationship.objects.get(id=sync_id, user=request.user)
+    except SyncRelationship.DoesNotExist:
+        messages.error(request, "Sync relationship not found.")
+        return redirect('sync_calendars')
+
+    event_mappings = EventMapping.objects.filter(relationship=relationship)
+    destination_calendar = relationship.destination_calendar
+
+    if not event_mappings:
+        relationship.delete()
+        messages.success(request, "Sync relationship removed. No events needed to be deleted.")
+        return redirect('sync_calendars')
+
+    # Handle Google Destination
+    if destination_calendar.provider == 'google':
+        try:
+            google_token = SocialToken.objects.get(account=destination_calendar.social_account)
+            credentials = Credentials(
+                token=google_token.token, refresh_token=google_token.token_secret,
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=google_token.app.client_id, client_secret=google_token.app.secret
+            )
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                google_token.token = credentials.token; google_token.save()
+
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # --- BATCH DELETION LOGIC ---
+            batch = service.new_batch_http_request()
+            for mapping in event_mappings:
+                batch.add(service.events().delete(
+                    calendarId=destination_calendar.calendar_id,
+                    eventId=mapping.destination_event_id
+                ))
+            batch.execute()
+
+            # Clean up our database
+            relationship.delete() # This will also cascade delete all EventMapping records
+            messages.success(request, f"Successfully deleted {event_mappings.count()} events and removed the sync.")
+
+        except Exception as e:
+            messages.error(request, f"An error occurred while deleting events from Google: {e}")
+
+    # TODO: Add similar logic for Microsoft destinations
+            
+    return redirect('sync_calendars')
+
+def trigger_sync_for_event(source_event: Event):
+    """
+    This is the core sync engine. Given a source event that has been created
+    or updated, it finds all relevant sync relationships and pushes the
+    changes to the destination calendars.
+    """
+    # Find all active syncs where this event's calendar is the source
+    relevant_syncs = SyncRelationship.objects.filter(
+        source_calendar__social_account=source_event.social_account,
+        source_calendar__calendar_id=source_event.calendar_provider_id,
+        is_active=True
+    )
+
+    for sync in relevant_syncs:
+        dest_calendar = sync.destination_calendar
+        sync_type = sync.sync_type
+        
+        # Prepare the event body based on the sync type
+        event_body = {
+            'summary': source_event.title if sync_type == 'full_details' else 'Busy',
+            'description': source_event.description if sync_type == 'full_details' else 'This time is booked.',
+            'location': source_event.location if sync_type == 'full_details' else '',
+            'start': {'dateTime': source_event.start_time.isoformat(), 'timeZone': 'UTC'},
+            'end': {'dateTime': source_event.end_time.isoformat(), 'timeZone': 'UTC'},
+        }
+
+        # Check if this event has been synced before for THIS relationship
+        mapping = EventMapping.objects.filter(relationship=sync, source_event=source_event).first()
+        
+        try:
+            if dest_calendar.provider == 'google':
+                token = SocialToken.objects.get(account=dest_calendar.social_account)
+                creds = Credentials(token=token.token, refresh_token=token.token_secret, token_uri='https://oauth2.googleapis.com/token', client_id=token.app.client_id, client_secret=token.app.secret)
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request()); token.token = creds.token; token.save()
+                service = build('calendar', 'v3', credentials=creds)
+
+                if mapping: # UPDATE existing event
+                    service.events().update(calendarId=dest_calendar.calendar_id, eventId=mapping.destination_event_id, body=event_body).execute()
+                    logger.info(f"Updated event {mapping.destination_event_id} in Google Calendar '{dest_calendar.name}'")
+                else: # CREATE new event
+                    created_event = service.events().insert(calendarId=dest_calendar.calendar_id, body=event_body).execute()
+                    EventMapping.objects.create(relationship=sync, source_event=source_event, destination_event_id=created_event['id'])
+                    logger.info(f"Created new event {created_event['id']} in Google Calendar '{dest_calendar.name}'")
+            
+            elif dest_calendar.provider == 'microsoft':
+                token = SocialToken.objects.get(account=dest_calendar.social_account)
+                headers = {'Authorization': f'Bearer {token.token}', 'Content-Type': 'application/json'}
+                
+                # Microsoft uses 'subject' instead of 'summary'
+                ms_event_body = {
+                    'subject': event_body['summary'], 'body': {'contentType': 'HTML', 'content': event_body['description']},
+                    'location': {'displayName': event_body['location']},
+                    'start': {'dateTime': event_body['start']['dateTime'], 'timeZone': 'UTC'},
+                    'end': {'dateTime': event_body['end']['dateTime'], 'timeZone': 'UTC'},
+                }
+
+                if mapping: # UPDATE
+                    url = f"https://graph.microsoft.com/v1.0/me/events/{mapping.destination_event_id}"
+                    response = requests.patch(url, headers=headers, json=ms_event_body)
+                    response.raise_for_status()
+                    logger.info(f"Updated event {mapping.destination_event_id} in Outlook Calendar '{dest_calendar.name}'")
+                else: # CREATE
+                    url = f"https://graph.microsoft.com/v1.0/me/calendars/{dest_calendar.calendar_id}/events"
+                    response = requests.post(url, headers=headers, json=ms_event_body)
+                    response.raise_for_status()
+                    created_event = response.json()
+                    EventMapping.objects.create(relationship=sync, source_event=source_event, destination_event_id=created_event['id'])
+                    logger.info(f"Created new event {created_event['id']} in Outlook Calendar '{dest_calendar.name}'")
+        
+        except Exception as e:
+            logger.error(f"Failed to sync event {source_event.id} for sync {sync.id}: {e}")
