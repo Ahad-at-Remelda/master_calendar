@@ -1,7 +1,7 @@
+                <h5>working onit</h5>
 
 
-
- {% load static %}
+{% comment %} {% load static %}
 {% load socialaccount %}
 
 <!DOCTYPE html>
@@ -10,7 +10,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sync Calendars - Master Calendar</title>
-    <!-- [ Stylesheets remain the same ] -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+Pro:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -100,6 +99,15 @@
             <div class="container-fluid py-4">
                 <h1 class="mb-4">Sync Calendars</h1>
                 <p class="text-muted">Select a source and a destination calendar to create a new sync relationship.</p>
+                
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
                 <hr>
 
                 <!-- Display existing sync relationships -->
@@ -127,14 +135,12 @@
                                     </div>
                                 </div>
                                 <div>
-                                    <!-- CHANGE THIS: -->
                                     <form action="{% url 'delete_sync' sync.id %}" method="POST" onsubmit="return confirm('Are you sure you want to delete this sync? All synced events will be removed from the destination calendar.');">
                                         {% csrf_token %}
                                         <button type="submit" class="btn btn-sm btn-outline-danger">
                                             <i class="bi bi-trash"></i> Delete
                                         </button>
                                     </form>
-                                    <!-- END OF CHANGE -->
                                 </div>
                             </div>
                         {% empty %}
@@ -145,7 +151,6 @@
 
                 <!-- Create a NEW sync -->
                 <h4>Create a New Sync</h4>
-                
                 <form id="create-sync-form" method="POST" action="{% url 'create_sync' %}">
                     {% csrf_token %}
                     <div class="row mt-3">
@@ -158,6 +163,8 @@
                                         <i class="bi bi-{{ cal.provider }} {% if cal.provider == 'google' %}text-success{% else %}text-primary{% endif %} me-2"></i>
                                         <strong>{{ cal.name }}</strong> ({{ cal.display_email }})
                                     </button>
+                                {% empty %}
+                                    <p class="text-muted p-2">No calendars found. Please connect a Google or Outlook account.</p>
                                 {% endfor %}
                             </div>
                             <input type="hidden" name="source_calendar_id" id="source_calendar_input">
@@ -186,6 +193,8 @@
                                         <i class="bi bi-{{ cal.provider }} {% if cal.provider == 'google' %}text-success{% else %}text-primary{% endif %} me-2"></i>
                                         <strong>{{ cal.name }}</strong> ({{ cal.display_email }})
                                     </button>
+                                {% empty %}
+                                    <p class="text-muted p-2">No calendars found.</p>
                                 {% endfor %}
                             </div>
                             <input type="hidden" name="destination_calendar_id" id="destination_calendar_input">
@@ -199,17 +208,26 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        // --- Sidebar Logic (unchanged) ---
         const sidebar = document.getElementById('sidebar');
         const pageWrapper = document.getElementById('pageWrapper');
         const sidebarToggle = document.getElementById('sidebarToggle');
         const sidebarClose = document.getElementById('sidebarClose');
-        function toggleSidebar() { /* ... */ }
+
+        function toggleSidebar() {
+            sidebar.classList.toggle('collapsed');
+            pageWrapper.classList.toggle('sidebar-collapsed');
+            sidebarToggle.classList.toggle('sidebar-open');
+            const icon = sidebarToggle.querySelector('i');
+            icon.className = sidebar.classList.contains('collapsed') ? 'bi bi-list' : 'bi bi-x';
+        }
+
         if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
         if (sidebarClose) sidebarClose.addEventListener('click', toggleSidebar);
-        if (window.innerWidth <= 768) { /* ... */ }
+        if (window.innerWidth <= 768) {
+            sidebar.classList.add('collapsed');
+            pageWrapper.classList.add('sidebar-collapsed');
+        }
 
-        // --- Sync Creation Form Logic ---
         const sourceList = document.getElementById('source-calendars-list');
         const destinationList = document.getElementById('destination-calendars-list');
         const sourceInput = document.getElementById('source_calendar_input');
@@ -219,104 +237,8 @@
         function checkFormState() {
             const sourceSelected = sourceInput.value;
             const destSelected = destinationInput.value;
-            // The button is enabled only if both are selected AND they are not the same.
             createSyncBtn.disabled = !(sourceSelected && destSelected && sourceSelected !== destSelected);
-        }@login_required
-def create_sync_relationship(request):
-    """
-    Handles the POST request from the sync_calendars.html form.
-    Creates the sync relationship and triggers the initial event sync.
-    """
-    if request.method != 'POST':
-        return redirect('sync_calendars')
-
-    user = request.user
-    source_cal_id = request.POST.get('source_calendar_id')
-    dest_cal_id = request.POST.get('destination_calendar_id')
-    sync_type = request.POST.get('sync_type')
-
-    # --- Basic Validation ---
-    if not all([source_cal_id, dest_cal_id, sync_type]):
-        messages.error(request, "Invalid form submission. Please select a source, destination, and sync type.")
-        return redirect('sync_calendars')
-    
-    if source_cal_id == dest_cal_id:
-        messages.error(request, "Source and destination calendars cannot be the same.")
-        return redirect('sync_calendars')
-
-    try:
-        source_calendar = SyncedCalendar.objects.get(id=source_cal_id, user=user)
-        destination_calendar = SyncedCalendar.objects.get(id=dest_cal_id, user=user)
-    except SyncedCalendar.DoesNotExist:
-        messages.error(request, "One of the selected calendars could not be found.")
-        return redirect('sync_calendars')
-
-    # --- Create the SyncRelationship in the database ---
-    relationship, created = SyncRelationship.objects.get_or_create(
-        user=user,
-        source_calendar=source_calendar,
-        destination_calendar=destination_calendar,
-        defaults={'sync_type': sync_type}
-    )
-
-    if not created:
-        messages.info(request, "A sync relationship between these calendars already exists.")
-        return redirect('sync_calendars')
-
-    # --- Trigger the Initial Sync ---
-    # Fetch all events from our database that belong to the source calendar.
-    events_to_sync = Event.objects.filter(
-        social_account=source_calendar.social_account,
-        calendar_provider_id=source_calendar.calendar_id
-    )
-
-    if not events_to_sync:
-        messages.success(request, f"Sync relationship created for '{source_calendar.name}' to '{destination_calendar.name}'. There were no initial events to sync.")
-        return redirect('sync_calendars')
-
-    # For now, we will handle a Google destination. We can add Microsoft later.
-    if destination_calendar.provider == 'google':
-        try:
-            google_token = SocialToken.objects.get(account=destination_calendar.social_account)
-            credentials = Credentials(
-                token=google_token.token, refresh_token=google_token.token_secret,
-                token_uri='https://oauth2.googleapis.com/token',
-                client_id=google_token.app.client_id, client_secret=google_token.app.secret
-            )
-            if credentials.expired and credentials.refresh_token:
-                credentials.refresh(Request())
-                google_token.token = credentials.token; google_token.save()
-            
-            service = build('calendar', 'v3', credentials=credentials)
-            
-            # --- BATCH PROCESSING LOGIC ---
-            batch = service.new_batch_http_request()
-            
-            for event in events_to_sync:
-                event_body = {
-                    'summary': event.title if sync_type == 'full_details' else 'Busy',
-                    'description': event.description if sync_type == 'full_details' else 'This time is booked.',
-                    'location': event.location if sync_type == 'full_details' else '',
-                    'start': {'dateTime': event.start_time.isoformat(), 'timeZone': 'UTC'},
-                    'end': {'dateTime': event.end_time.isoformat(), 'timeZone': 'UTC'},
-                }
-                batch.add(service.events().insert(calendarId=destination_calendar.calendar_id, body=event_body))
-            
-            batch.execute() # Execute the batch request
-            
-            # Note: A full implementation would use the batch callback to get the new event IDs
-            # and create the EventMapping records. For now, we'll skip this part for simplicity.
-            # We will add the EventMapping logic in the final step.
-
-            messages.success(request, f"Successfully started sync and copied {events_to_sync.count()} events to '{destination_calendar.name}'.")
-
-        except Exception as e:
-            messages.error(request, f"Failed to sync events to Google: {e}")
-            relationship.delete() # Roll back the relationship if the sync fails
-
-    # TODO: Add logic here for when the destination is a Microsoft calendar.
-    
-    return redirect('sync_calendars')
+        }
 
         sourceList.addEventListener('click', function(e) {
             const button = e.target.closest('button.list-group-item-action');
@@ -326,11 +248,9 @@ def create_sync_relationship(request):
             button.classList.add('active');
             sourceInput.value = button.dataset.calendarId;
 
-            // Hide the selected calendar from the destination list
             destinationList.querySelectorAll('button').forEach(btn => {
                 btn.style.display = (btn.dataset.calendarId === sourceInput.value) ? 'none' : 'block';
             });
-            // If the currently selected destination is now hidden, clear it
             if (destinationInput.value === sourceInput.value) {
                 destinationList.querySelectorAll('.active').forEach(btn => btn.classList.remove('active'));
                 destinationInput.value = '';
@@ -347,11 +267,9 @@ def create_sync_relationship(request):
             button.classList.add('active');
             destinationInput.value = button.dataset.calendarId;
 
-            // Hide the selected calendar from the source list
             sourceList.querySelectorAll('button').forEach(btn => {
                 btn.style.display = (btn.dataset.calendarId === destinationInput.value) ? 'none' : 'block';
             });
-             // If the currently selected source is now hidden, clear it
             if (sourceInput.value === destinationInput.value) {
                 sourceList.querySelectorAll('.active').forEach(btn => btn.classList.remove('active'));
                 sourceInput.value = '';
@@ -362,4 +280,4 @@ def create_sync_relationship(request):
     });
     </script>
 </body>
-</html>
+</html> {% endcomment %}

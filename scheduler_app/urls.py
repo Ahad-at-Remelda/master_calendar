@@ -41,5 +41,5 @@ urlpatterns = [
     path('book/<uuid:sharing_uuid>/confirm/<str:datetime_iso>/', views.confirm_booking_view, name='confirm_booking'),
     
     # This old hardcoded sync can be removed if you no longer need it
-    path('sync-outlook-to-google/', views.sync_outlook_to_google, name='sync_outlook_to_google'),
+    #path('sync-outlook-to-google/', views.sync_outlook_to_google, name='sync_outlook_to_google'),
 ]

@@ -376,6 +376,8 @@ def event_detail_api(request, event_id):
         'source': event.source, 'account_email': account_email,
     }
     return JsonResponse(data)
+
+
 # =======================================================================
 # == THE SYNC ENGINE ====================================================
 # =======================================================================
@@ -446,10 +448,11 @@ def delete_synced_event(source_event: Event):
                 token = SocialToken.objects.get(account=dest_calendar.social_account)
                 headers = {'Authorization': f'Bearer {token.token}'}
                 url = f"https://graph.microsoft.com/v1.0/me/events/{mapping.destination_event_id}"
-                requests.delete(url, headers=headers)
+                requests.delete(url, headers=headers) # raise_for_status() not needed for delete
                 logger.info(f"Deleted synced event {mapping.destination_event_id} from Outlook Calendar '{dest_calendar.name}'")
             mapping.delete()
         except Exception as e:
+            # We log the error but continue, in case the event was already deleted manually
             logger.error(f"Failed to delete synced event for mapping {mapping.id}: {e}")
 
 
@@ -458,7 +461,7 @@ def delete_synced_event(source_event: Event):
 def google_webhook_receiver(request):
     channel_id = request.headers.get('X-Goog-Channel-ID')
     try:
-        webhook = GoogleWebhookChannel.objects.get(channel_id=channel_id)
+        webhook = GoogleWebhookChannel.objects.select_related('social_account__user').get(channel_id=channel_id)
         social_acc = webhook.social_account
         user = social_acc.user
         token = SocialToken.objects.get(account=social_acc)
@@ -466,6 +469,7 @@ def google_webhook_receiver(request):
         if creds.expired and creds.refresh_token:
             creds.refresh(Request()); token.token = creds.token; token.save()
         service = build('calendar', 'v3', credentials=creds)
+        
         calendar_list = service.calendarList().list().execute()
         all_events_data = []
         for calendar_entry in calendar_list.get('items', []):
@@ -476,16 +480,21 @@ def google_webhook_receiver(request):
                     all_events_data.append(event)
             except Exception as e:
                 logger.error(f"Could not fetch events from calendar {calendar_entry['id']} for user {user.username}: {e}")
+        
         api_event_ids = {e['id'] for e in all_events_data}
+
         for event_data in all_events_data:
             event_id = event_data.get('id')
             start_raw = event_data.get('start', {}).get('dateTime') or event_data.get('start', {}).get('date')
             if not event_id or not start_raw: continue
+            
             start_time = parser.parse(start_raw)
             end_time = parser.parse(event_data.get('end', {}).get('dateTime') or event_data.get('end', {}).get('date')) if event_data.get('end') else start_time
+            
             defaults = {'user': user, 'title': event_data.get('summary', 'No Title'),'description': event_data.get('description', ''),'date': start_time.date(),'start_time': start_time,'end_time': end_time,'source': 'google','calendar_provider_id': event_data.get('calendar_provider_id')}
             saved_event, created = Event.objects.update_or_create(social_account=social_acc, event_id=event_id, defaults=defaults)
             trigger_sync_for_event(saved_event)
+            
         db_events = Event.objects.filter(social_account=social_acc)
         deleted_provider_ids = {e.event_id for e in db_events} - api_event_ids
         for provider_id in deleted_provider_ids:
@@ -496,6 +505,7 @@ def google_webhook_receiver(request):
                 logger.info(f"Deleted event {provider_id} from local DB and synced destinations.")
             except Event.DoesNotExist:
                 continue
+
         async_to_sync(get_channel_layer().group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
         logger.info(f"Google webhook sync complete for social account {social_acc.uid}")
     except Exception as e:
@@ -507,29 +517,35 @@ def outlook_webhook_receiver(request):
     validation_token = request.GET.get('validationToken')
     if validation_token:
         return HttpResponse(validation_token, content_type='text/plain')
+
     try:
         notification = json.loads(request.body)
         for notif in notification.get('value', []):
             subscription_id = notif.get('subscriptionId')
             try:
-                sub = OutlookWebhookSubscription.objects.get(subscription_id=subscription_id)
+                sub = OutlookWebhookSubscription.objects.select_related('social_account__user').get(subscription_id=subscription_id)
                 social_acc = sub.social_account
                 user = social_acc.user
                 token = SocialToken.objects.get(account=social_acc)
                 headers = {'Authorization': f'Bearer {token.token}'}
-                response = requests.get("https://graph.microsoft.com/v1.0/me/events?$expand=calendar", headers=headers)
+                events_endpoint = "https://graph.microsoft.com/v1.0/me/events?$expand=calendar"
+                response = requests.get(events_endpoint, headers=headers)
                 response.raise_for_status()
                 events_data = response.json().get('value', [])
                 api_event_ids = {e['id'] for e in events_data}
+
                 for event_data in events_data:
                     event_id = event_data.get('id')
                     start_raw = event_data.get('start', {}).get('dateTime')
                     if not event_id or not start_raw: continue
+
                     start_time = parser.parse(start_raw)
                     end_time = parser.parse(event_data.get('end', {}).get('dateTime')) if event_data.get('end') else start_time
+                    
                     defaults = {'user': user,'title': event_data.get('subject', 'No Title'),'description': event_data.get('bodyPreview', ''),'date': start_time.date(),'start_time': start_time,'end_time': end_time,'source': 'microsoft','calendar_provider_id': event_data.get('calendar', {}).get('id')}
                     saved_event, created = Event.objects.update_or_create(social_account=social_acc, event_id=event_id, defaults=defaults)
                     trigger_sync_for_event(saved_event)
+                
                 db_events = Event.objects.filter(social_account=social_acc)
                 deleted_provider_ids = {e.event_id for e in db_events} - api_event_ids
                 for provider_id in deleted_provider_ids:
@@ -540,6 +556,7 @@ def outlook_webhook_receiver(request):
                         logger.info(f"Deleted event {provider_id} from local DB and synced destinations.")
                     except Event.DoesNotExist:
                         continue
+                
                 async_to_sync(get_channel_layer().group_send)(f"user_{user.id}", {"type": "calendar.update", "update": "calendar_changed"})
                 logger.info(f"Outlook webhook sync complete for social account {social_acc.uid}")
             except Exception as e:
@@ -550,7 +567,7 @@ def outlook_webhook_receiver(request):
 
 
 # =======================================================================
-# == FULLY IMPLEMENTED SYNC VIEWS =======================================
+# == FULLY IMPLEMENTED SYNC CREATION & DELETION VIEWS ===================
 # =======================================================================
 @login_required
 def sync_calendars_view(request):
@@ -615,7 +632,7 @@ def create_sync_relationship(request):
                 creds.refresh(Request()); token.token = creds.token; token.save()
             service = build('calendar', 'v3', credentials=creds)
             batch = service.new_batch_http_request(callback=google_batch_callback)
-            for event in events_to_sync:
+            for i, event in enumerate(events_to_sync):
                 event_body = {'summary': event.title if sync_type == 'full_details' else 'Busy','description': event.description if sync_type == 'full_details' else 'This time is booked.','location': event.location if sync_type == 'full_details' else '','start': {'dateTime': event.start_time.isoformat(), 'timeZone': 'UTC'},'end': {'dateTime': event.end_time.isoformat(), 'timeZone': 'UTC'}}
                 batch.add(service.events().insert(calendarId=destination_calendar.calendar_id, body=event_body), request_id=f"{event.id}:{relationship.id}")
             batch.execute()
@@ -637,7 +654,7 @@ def create_sync_relationship(request):
                         successful_mappings_to_create.append(EventMapping(relationship=relationship, source_event_id=int(resp['id']), destination_event_id=resp['body']['id']))
 
         if batch_errors:
-             raise Exception("Batch processing failed for some requests: " + ", ".join(batch_errors))
+             raise Exception("Batch processing failed for some requests.")
 
         EventMapping.objects.bulk_create(successful_mappings_to_create)
         messages.success(request, f"Successfully copied {len(successful_mappings_to_create)} events to '{destination_calendar.name}'.")
@@ -688,7 +705,7 @@ def delete_sync_relationship(request, sync_id):
                 chunk = batch_requests[i:i+20]
                 requests.post("https://graph.microsoft.com/v1.0/$batch", headers=headers, json={"requests": chunk}).raise_for_status()
 
-        relationship.delete()
+        relationship.delete() # Cascade delete will handle the mappings
         messages.success(request, f"Successfully removed sync and deleted {event_mappings.count()} events from '{destination_calendar.name}'.")
     except Exception as e:
         messages.error(request, f"An error occurred while deleting events: {e}")
